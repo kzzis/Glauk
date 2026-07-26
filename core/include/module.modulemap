@@ -1,0 +1,4 @@
+module GlaukCore {
+    umbrella header "glauk.h"
+    export *
+}
