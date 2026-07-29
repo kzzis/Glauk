@@ -14,7 +14,27 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
-    b.installArtifact(lib);
+    const install_lib = b.addInstallArtifact(lib, .{});
+    const installed_library = b.getInstallPath(.lib, "libglaukcore.a");
+    const repacked_library = b.fmt("{s}.repacked", .{installed_library});
+
+    const repack = b.addSystemCommand(&.{
+        "/usr/bin/libtool",
+        "-static",
+        "-o",
+        repacked_library,
+        installed_library,
+    });
+    repack.step.dependOn(&install_lib.step);
+
+    const replace = b.addSystemCommand(&.{
+        "/bin/mv",
+        repacked_library,
+        installed_library,
+    });
+    replace.step.dependOn(&repack.step);
+
+    b.getInstallStep().dependOn(&replace.step);
     b.installFile("include/glauk.h", "include/glauk.h");
     b.installFile("include/module.modulemap", "include/module.modulemap");
 }

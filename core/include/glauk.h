@@ -1,4 +1,6 @@
-#ifdef GLAUK_H
+#ifndef GLAUK_H
 #define GLAUK_H
+
 const char* glauk_ping(void);
-#endif // DEBUG
+
+#endif // GLAUK_H
