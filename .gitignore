@@ -16,6 +16,12 @@
 *.swo
 *~
 
+# Xcode
+xcuserdata/
+*.xcuserstate
+DerivedData/
+.build-check/
+
 # macOS
 .DS_Store
 .AppleDouble
