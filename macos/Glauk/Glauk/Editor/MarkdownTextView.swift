@@ -49,6 +49,7 @@ struct MarkdownTextView: NSViewRepresentable {
 
         textView.string = text
         context.coordinator.textView = textView
+        context.coordinator.textStorage = storage   // ★ NSTextStorageの所有者がここしか無いので強参照で保持する
         context.coordinator.highlighter.apply(to: storage, cursorLine: nil)
 
         let scrollView = NSScrollView()
@@ -76,6 +77,7 @@ struct MarkdownTextView: NSViewRepresentable {
         private let parent: MarkdownTextView
         let highlighter = SyntaxHighlighter()
         weak var textView: NSTextView?
+        var textStorage: NSTextStorage?   // NSTextView/NSTextContainerはlayoutManagerを弱参照するため、これが無いと解放されて編集不能になる
         private var lastCursorLine: NSRange?
 
         init(_ parent: MarkdownTextView) {
