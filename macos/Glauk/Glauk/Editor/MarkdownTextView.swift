@@ -12,8 +12,9 @@ struct MarkdownTextView: NSViewRepresentable {
 
     // 最初に1回だけ呼ばれる。ここでAppKit側を組み立てる
     func makeNSView(context: Context) -> NSScrollView {
-        let layoutManager = NSLayoutManager()
+        let layoutManager = MarkdownLayoutManager()
         let storage = NSTextStorage()
+        storage.delegate = context.coordinator
         storage.addLayoutManager(layoutManager)
 
         let container = NSTextContainer(
@@ -48,6 +49,7 @@ struct MarkdownTextView: NSViewRepresentable {
 
         textView.string = text
         context.coordinator.textView = textView
+        context.coordinator.highlighter.apply(to: storage, cursorLine: nil)
 
         let scrollView = NSScrollView()
         scrollView.hasVerticalScroller = true
@@ -65,11 +67,16 @@ struct MarkdownTextView: NSViewRepresentable {
         textView.string = text
         let safeLocation = min(selected.location, (text as NSString).length)
         textView.setSelectedRange(NSRange(location: safeLocation, length: 0))
+        if let storage = textView.textStorage {
+            context.coordinator.highlighter.apply(to: storage, cursorLine: nil)
+        }
     }
 
-    final class Coordinator: NSObject, NSTextViewDelegate {
+    final class Coordinator: NSObject, NSTextViewDelegate, NSTextStorageDelegate {
         private let parent: MarkdownTextView
+        let highlighter = SyntaxHighlighter()
         weak var textView: NSTextView?
+        private var lastCursorLine: NSRange?
 
         init(_ parent: MarkdownTextView) {
             self.parent = parent
@@ -89,10 +96,35 @@ struct MarkdownTextView: NSViewRepresentable {
             #endif
         }
 
+        // NSTextStorage が編集を確定させた直後に呼ばれる。ここで段落単位のLive Previewを更新する
+        func textStorage(
+            _ textStorage: NSTextStorage,
+            didProcessEditing editedMask: NSTextStorageEditActions,
+            range editedRange: NSRange,
+            changeInLength delta: Int
+        ) {
+            guard editedMask.contains(.editedCharacters) else { return }
+            guard let textView, !textView.hasMarkedText() else { return }   // 変換中は触らない
+
+            let cursorLine = (textStorage.string as NSString).lineRange(for: textView.selectedRange())
+            highlighter.applyIncremental(to: textStorage, editedRange: editedRange, cursorLine: cursorLine)
+            lastCursorLine = cursorLine
+        }
+
         func textViewDidChangeSelection(_ notification: Notification) {
-            guard parent.typewriterScroll,
-                  let textView = notification.object as? NSTextView else { return }
-            scrollCurrentLineToCenter(textView)
+            guard let textView = notification.object as? NSTextView,
+                  let storage = textView.textStorage else { return }
+
+            let ns = storage.string as NSString
+            let current = ns.lineRange(for: textView.selectedRange())
+
+            if let previous = lastCursorLine, previous != current {
+                highlighter.applySpans(to: storage, in: previous, cursorLine: current)
+            }
+            highlighter.applySpans(to: storage, in: current, cursorLine: current)
+            lastCursorLine = current
+
+            if parent.typewriterScroll { scrollCurrentLineToCenter(textView) }
         }
 
         private func scrollCurrentLineToCenter(_ textView: NSTextView) {
