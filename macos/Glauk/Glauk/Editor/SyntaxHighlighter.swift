@@ -64,8 +64,9 @@ final class SyntaxHighlighter {
     /// 変更のあった範囲を含む段落だけを再計算する
     func applyIncremental(to storage: NSTextStorage, editedRange: NSRange, cursorLine: NSRange?) {
         let ns = storage.string as NSString
+        let safeEditedRange = editedRange.clamped(to: ns.length)
         // 編集範囲を含む段落へ広げる(前後1行を含めると `**` の跨ぎに強くなる)
-        var scope = ns.paragraphRange(for: editedRange)
+        var scope = ns.paragraphRange(for: safeEditedRange)
         if scope.location > 0 {
             scope = ns.paragraphRange(for: NSRange(location: scope.location - 1, length: 1))
                 .union(scope)
@@ -79,5 +80,12 @@ extension NSRange {
         let start = Swift.min(location, other.location)
         let end = Swift.max(NSMaxRange(self), NSMaxRange(other))
         return NSRange(location: start, length: end - start)
+    }
+
+    /// `length` の範囲内に収まるよう location/length を切り詰める
+    func clamped(to length: Int) -> NSRange {
+        let start = Swift.min(location, length)
+        let end = Swift.min(NSMaxRange(self), length)
+        return NSRange(location: start, length: Swift.max(0, end - start))
     }
 }

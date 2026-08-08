@@ -108,7 +108,10 @@ struct MarkdownTextView: NSViewRepresentable {
             guard editedMask.contains(.editedCharacters) else { return }
             guard let textView, !textView.hasMarkedText() else { return }   // 変換中は触らない
 
-            let cursorLine = (textStorage.string as NSString).lineRange(for: textView.selectedRange())
+            let ns = textStorage.string as NSString
+            // ★ ここで渡ってくる selectedRange は、直前の削除等でまだ古い(編集前の)値のことがある
+            let selection = textView.selectedRange().clamped(to: ns.length)
+            let cursorLine = ns.lineRange(for: selection)
             highlighter.applyIncremental(to: textStorage, editedRange: editedRange, cursorLine: cursorLine)
             lastCursorLine = cursorLine
         }
@@ -118,7 +121,8 @@ struct MarkdownTextView: NSViewRepresentable {
                   let storage = textView.textStorage else { return }
 
             let ns = storage.string as NSString
-            let current = ns.lineRange(for: textView.selectedRange())
+            let selection = textView.selectedRange().clamped(to: ns.length)
+            let current = ns.lineRange(for: selection)
 
             if let previous = lastCursorLine, previous != current {
                 highlighter.applySpans(to: storage, in: previous, cursorLine: current)
