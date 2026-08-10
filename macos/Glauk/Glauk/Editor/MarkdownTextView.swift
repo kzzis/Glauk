@@ -96,6 +96,8 @@ struct MarkdownTextView: NSViewRepresentable {
         weak var textView: NSTextView?
         var textStorage: NSTextStorage?   // NSTextView/NSTextContainerはlayoutManagerを弱参照するため、これが無いと解放されて編集不能になる
         private var lastCursorLine: NSRange?
+        private var pendingEditedRange: NSRange?
+        private var highlightScheduled = false
 
         init(_ parent: MarkdownTextView) {
             self.parent = parent
@@ -172,7 +174,11 @@ struct MarkdownTextView: NSViewRepresentable {
             #endif
         }
 
-        // NSTextStorage が編集を確定させた直後に呼ばれる。ここで段落単位のLive Previewを更新する
+        // NSTextStorage が編集を確定させた直後に呼ばれる。
+        // ★ ここで属性を書き換えてはいけない。AppKit の編集サイクルの内側なので、
+        //   SwiftUI に載せた状態だと変換確定(日本語入力の1回目のEnter)の直後に
+        //   その行のレイアウトが失われ、行が丸ごと描画されなくなる。
+        //   編集範囲だけ覚えておいて、サイクルを抜けてから塗る。
         func textStorage(
             _ textStorage: NSTextStorage,
             didProcessEditing editedMask: NSTextStorageEditActions,
@@ -180,37 +186,47 @@ struct MarkdownTextView: NSViewRepresentable {
             changeInLength delta: Int
         ) {
             guard editedMask.contains(.editedCharacters) else { return }
-            guard let textView, !textView.hasMarkedText() else { return }   // 変換中は触らない
-
-            let ns = textStorage.string as NSString
-            // ★ ここで渡ってくる selectedRange は、直前の削除等でまだ古い(編集前の)値のことがある
-            let selection = textView.selectedRange().clamped(to: ns.length)
-            let cursorLine = ns.lineRange(for: selection)
-            highlighter.applyIncremental(to: textStorage, editedRange: editedRange, cursorLine: cursorLine)
-            lastCursorLine = cursorLine
+            pendingEditedRange = pendingEditedRange.map { $0.union(editedRange) } ?? editedRange
+            scheduleHighlight()
         }
 
         func textViewDidChangeSelection(_ notification: Notification) {
-            guard let textView = notification.object as? NSTextView,
-                  let storage = textView.textStorage else { return }
-            // 変換中は選択範囲が動くたびにここへ来る。属性を書き換えると変換が壊れるので
-            // スクロールだけ追従して、ハイライトは確定後にまとめてやる。
-            guard !textView.hasMarkedText() else {
-                if parent.typewriterScroll { scrollCurrentLineToCenter(textView) }
-                return
+            guard let textView = notification.object as? NSTextView else { return }
+            scheduleHighlight()
+            if parent.typewriterScroll { scrollCurrentLineToCenter(textView) }
+        }
+
+        /// 編集サイクルを抜けた次のターンで、まとめて1回だけ塗る
+        private func scheduleHighlight() {
+            guard !highlightScheduled else { return }
+            highlightScheduled = true
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.highlightScheduled = false
+                self.runPendingHighlight()
             }
+        }
+
+        private func runPendingHighlight() {
+            guard let textView, let storage = textView.textStorage else { return }
+            guard !textView.hasMarkedText() else { return }   // 変換中は触らない
 
             let ns = storage.string as NSString
             let selection = textView.selectedRange().clamped(to: ns.length)
-            let current = ns.lineRange(for: selection)
+            let cursorLine = ns.lineRange(for: selection)
 
-            if let previous = lastCursorLine, previous != current {
-                highlighter.applySpans(to: storage, in: previous, cursorLine: current)
+            if let edited = pendingEditedRange {
+                pendingEditedRange = nil
+                highlighter.applyIncremental(to: storage,
+                                             editedRange: edited.clamped(to: ns.length),
+                                             cursorLine: cursorLine)
             }
-            highlighter.applySpans(to: storage, in: current, cursorLine: current)
-            lastCursorLine = current
-
-            if parent.typewriterScroll { scrollCurrentLineToCenter(textView) }
+            // カーソルが移った先と、離れた行の両方を塗り直す(ソース表示の切り替え)
+            if let previous = lastCursorLine, previous != cursorLine {
+                highlighter.applySpans(to: storage, in: previous, cursorLine: cursorLine)
+            }
+            highlighter.applySpans(to: storage, in: cursorLine, cursorLine: cursorLine)
+            lastCursorLine = cursorLine
         }
 
         private func scrollCurrentLineToCenter(_ textView: NSTextView) {
