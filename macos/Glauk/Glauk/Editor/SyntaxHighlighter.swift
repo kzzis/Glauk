@@ -7,6 +7,9 @@ struct EditorTypography {
         let sizes: [CGFloat] = [28, 22, 18]
         return NSFont.systemFont(ofSize: sizes[min(level, 3) - 1], weight: .bold)
     }
+    var bold: (NSFont) -> NSFont = { base in
+        NSFontManager.shared.convert(base, toHaveTrait: .boldFontMask)
+    }
     var accent = NSColor.systemRed      // Step 9 でテーマトークンに差し替え
     var ink = NSColor.textColor
 }
@@ -35,6 +38,9 @@ final class SyntaxHighlighter {
         storage.addAttribute(.font, value: typography.body, range: scope)
         storage.addAttribute(.foregroundColor, value: typography.ink, range: scope)
 
+        // bold_marker は開き・閉じの2個1組で来る(Zig側が閉じが見つかったときだけ両方を返すため)
+        var pendingBoldOpen: Span?
+
         for span in spans {
             guard NSMaxRange(span.range) <= storage.length else { continue }
             let onCursorLine = cursorLine.map { NSIntersectionRange($0, span.range).length > 0 }
@@ -47,7 +53,20 @@ final class SyntaxHighlighter {
                 storage.addAttribute(.font, value: typography.heading(level), range: lineRange)
                 if !onCursorLine { storage.addAttribute(.glaukHidden, value: true, range: span.range) }
 
-            case .boldMarker, .wikilinkHidden:
+            case .boldMarker:
+                if let open = pendingBoldOpen {
+                    let contentStart = NSMaxRange(open.range)
+                    let contentRange = NSRange(location: contentStart, length: span.range.location - contentStart)
+                    if contentRange.length > 0, NSMaxRange(contentRange) <= storage.length {
+                        storage.addAttribute(.font, value: typography.bold(typography.body), range: contentRange)
+                    }
+                    pendingBoldOpen = nil
+                } else {
+                    pendingBoldOpen = span
+                }
+                if !onCursorLine { storage.addAttribute(.glaukHidden, value: true, range: span.range) }
+
+            case .wikilinkHidden:
                 if !onCursorLine { storage.addAttribute(.glaukHidden, value: true, range: span.range) }
 
             case .wikilinkName:
