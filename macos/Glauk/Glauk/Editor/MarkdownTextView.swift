@@ -62,14 +62,21 @@ struct MarkdownTextView: NSViewRepresentable {
     // SwiftUI側の状態が変わるたびに呼ばれる
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         guard let textView = scrollView.documentView as? NSTextView else { return }
+        // ★ 変換中(marked text)は絶対に触らない。
+        //   下の `textView.string = text` はテキストビューを丸ごと置き換えるので、
+        //   変換中に SwiftUI の再描画が挟まると未確定の文字列ごと消える。
+        guard !textView.hasMarkedText() else { return }
         guard textView.string != text else { return }   // ★ 無限ループ防止
 
         let selected = textView.selectedRange()
         textView.string = text
-        let safeLocation = min(selected.location, (text as NSString).length)
+        let ns = text as NSString
+        let safeLocation = min(selected.location, ns.length)
         textView.setSelectedRange(NSRange(location: safeLocation, length: 0))
         if let storage = textView.textStorage {
-            context.coordinator.highlighter.apply(to: storage, cursorLine: nil)
+            // cursorLine を nil にするとカーソル行のマーカーまで隠れてしまう
+            let cursorLine = ns.lineRange(for: NSRange(location: safeLocation, length: 0))
+            context.coordinator.highlighter.apply(to: storage, cursorLine: cursorLine)
         }
     }
 
@@ -94,16 +101,29 @@ struct MarkdownTextView: NSViewRepresentable {
 
             let ns = textView.string as NSString
             let loc = affectedCharRange.location
+            guard loc <= ns.length else { return true }
+
+            func openMarkerCount(before end: Int) -> Int {
+                let lineRange = ns.lineRange(for: NSRange(location: end, length: 0))
+                let prefix = ns.substring(with: NSRange(location: lineRange.location,
+                                                        length: end - lineRange.location))
+                return markerPairCount(in: prefix)
+            }
+
+            // 補った閉じ `**` の上から打てるようにする。そうしないと自分で閉じを打ったときに
+            // `**太字****` のように余ってしまう。
+            if loc < ns.length, ns.character(at: loc) == asterisk,
+               openMarkerCount(before: loc) % 2 == 1 {
+                textView.setSelectedRange(NSRange(location: loc + 1, length: 0))
+                return false
+            }
+
             // 直前が `*` のときだけ = いま打った `*` で `**` が揃うとき
-            guard loc > 0, loc <= ns.length, ns.character(at: loc - 1) == asterisk else { return true }
+            guard loc > 0, ns.character(at: loc - 1) == asterisk else { return true }
             // `***` になる打ち方には介入しない
             if loc >= 2, ns.character(at: loc - 2) == asterisk { return true }
-
             // 行内に閉じられていない `**` が既にあるなら、この `**` は閉じ側なので補わない
-            let lineRange = ns.lineRange(for: NSRange(location: loc, length: 0))
-            let prefix = ns.substring(with: NSRange(location: lineRange.location,
-                                                    length: loc - 1 - lineRange.location))
-            guard markerPairCount(in: prefix) % 2 == 0 else { return true }
+            guard openMarkerCount(before: loc - 1) % 2 == 0 else { return true }
 
             textView.insertText("***", replacementRange: affectedCharRange)
             textView.setSelectedRange(NSRange(location: loc + 1, length: 0))
@@ -163,6 +183,12 @@ struct MarkdownTextView: NSViewRepresentable {
         func textViewDidChangeSelection(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView,
                   let storage = textView.textStorage else { return }
+            // 変換中は選択範囲が動くたびにここへ来る。属性を書き換えると変換が壊れるので
+            // スクロールだけ追従して、ハイライトは確定後にまとめてやる。
+            guard !textView.hasMarkedText() else {
+                if parent.typewriterScroll { scrollCurrentLineToCenter(textView) }
+                return
+            }
 
             let ns = storage.string as NSString
             let selection = textView.selectedRange().clamped(to: ns.length)
