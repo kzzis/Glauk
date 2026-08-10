@@ -84,6 +84,50 @@ struct MarkdownTextView: NSViewRepresentable {
             self.parent = parent
         }
 
+        /// `**` を打ち終えた時点で閉じの `**` を補い、カーソルを内側に置く
+        func textView(
+            _ textView: NSTextView,
+            shouldChangeTextIn affectedCharRange: NSRange,
+            replacementString: String?
+        ) -> Bool {
+            guard replacementString == "*", affectedCharRange.length == 0 else { return true }
+
+            let ns = textView.string as NSString
+            let loc = affectedCharRange.location
+            // 直前が `*` のときだけ = いま打った `*` で `**` が揃うとき
+            guard loc > 0, loc <= ns.length, ns.character(at: loc - 1) == asterisk else { return true }
+            // `***` になる打ち方には介入しない
+            if loc >= 2, ns.character(at: loc - 2) == asterisk { return true }
+
+            // 行内に閉じられていない `**` が既にあるなら、この `**` は閉じ側なので補わない
+            let lineRange = ns.lineRange(for: NSRange(location: loc, length: 0))
+            let prefix = ns.substring(with: NSRange(location: lineRange.location,
+                                                    length: loc - 1 - lineRange.location))
+            guard markerPairCount(in: prefix) % 2 == 0 else { return true }
+
+            textView.insertText("***", replacementRange: affectedCharRange)
+            textView.setSelectedRange(NSRange(location: loc + 1, length: 0))
+            return false
+        }
+
+        private let asterisk = unichar(UInt8(ascii: "*"))
+
+        /// 重なりを数えないように `**` の個数を数える
+        private func markerPairCount(in text: String) -> Int {
+            let chars = Array(text.utf16)
+            var count = 0
+            var i = 0
+            while i + 1 < chars.count {
+                if chars[i] == asterisk && chars[i + 1] == asterisk {
+                    count += 1
+                    i += 2
+                } else {
+                    i += 1
+                }
+            }
+            return count
+        }
+
         func textDidChange(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
             #if DEBUG
