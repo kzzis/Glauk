@@ -68,6 +68,16 @@ struct MarkdownTextView: NSViewRepresentable {
         guard !textView.hasMarkedText() else { return }
         guard textView.string != text else { return }   // ★ 無限ループ防止
 
+        // ★ 編集中はテキストビューが正。
+        //   SwiftUI から届く `text` は、テキストビューが既に持っている内容より
+        //   古いことがある(特に日本語変換は1文字ごとに何度も状態を更新するので、
+        //   確定がその更新列の間に挟まる)。古い値をここで代入すると、
+        //   いま確定したばかりの文字が消える。
+        //   外から流し込む必要が出てくるのは Step 4 のファイル読み込み以降で、
+        //   そのときは binding 経由ではなく明示的な読み込み経路を作ること。
+        let isEditing = textView.window?.firstResponder === textView
+        guard !isEditing else { return }
+
         let selected = textView.selectedRange()
         textView.string = text
         let ns = text as NSString
