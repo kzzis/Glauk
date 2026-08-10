@@ -2,13 +2,24 @@
 import AppKit
 
 struct EditorTypography {
-    var body = NSFont.systemFont(ofSize: 15)
+    /// MarkdownTextView が textView.font に入れているものと必ず揃えること。
+    /// ここがズレると applySpans が全文の .font を上書きしてしまい、等幅で書いているつもりが
+    /// プロポーショナルで表示される(太字の差も分かりにくくなる)。
+    var body = NSFont(name: "IBMPlexMono", size: 15)
+        ?? NSFont.monospacedSystemFont(ofSize: 15, weight: .regular)
     var heading: (Int) -> NSFont = { level in
         let sizes: [CGFloat] = [28, 22, 18]
         return NSFont.systemFont(ofSize: sizes[min(level, 3) - 1], weight: .bold)
     }
+    /// システム等幅フォントに対しては、NSFontManager の変換もディスクリプタの .bold も
+    /// **Semibold(weight 0.30)** しか返さず「太くなっていない」ように見える。
+    /// 変換結果のウェイトを確かめ、bold に届かなければ等幅の bold ウェイト(0.40)を使う。
     var bold: (NSFont) -> NSFont = { base in
-        NSFontManager.shared.convert(base, toHaveTrait: .boldFontMask)
+        let converted = NSFontManager.shared.convert(base, toHaveTrait: .boldFontMask)
+        let traits = converted.fontDescriptor.object(forKey: .traits) as? [NSFontDescriptor.TraitKey: Any]
+        let weight = (traits?[.weight] as? CGFloat) ?? 0
+        if weight >= NSFont.Weight.bold.rawValue { return converted }
+        return NSFont.monospacedSystemFont(ofSize: base.pointSize, weight: .bold)
     }
     var accent = NSColor.systemRed      // Step 9 でテーマトークンに差し替え
     var ink = NSColor.textColor
