@@ -2,6 +2,8 @@
 
 pub const ffi = @import("ffi.zig");
 pub const markdown = @import("markdown.zig");
+pub const file = @import("file.zig");
+pub const watch = @import("watch.zig");
 
 export fn glauk_ping() callconv(.c) [*:0]const u8 {
     return "pong";
@@ -10,4 +12,6 @@ export fn glauk_ping() callconv(.c) [*:0]const u8 {
 comptime {
     _ = ffi;
     _ = markdown;
+    _ = file;
+    _ = watch;
 }
