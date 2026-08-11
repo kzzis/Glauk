@@ -4,6 +4,7 @@ import AppKit
 
 struct MarkdownTextView: NSViewRepresentable {
     @Binding var text: String
+    var noteIndex: NoteIndex
     var typewriterScroll: Bool = true
 
     func makeCoordinator() -> Coordinator {
@@ -22,8 +23,9 @@ struct MarkdownTextView: NSViewRepresentable {
         container.widthTracksTextView = true
         layoutManager.addTextContainer(container)
 
-        let textView = NSTextView(frame: .zero, textContainer: container)
+        let textView = EditorTextView(frame: .zero, textContainer: container)
         textView.delegate = context.coordinator
+        textView.linkDelegate = context.coordinator
 
         // --- 書き心地に効く設定 ---
         textView.isRichText = false                          // 貼り付けで書式を持ち込ませない
@@ -90,9 +92,10 @@ struct MarkdownTextView: NSViewRepresentable {
         }
     }
 
-    final class Coordinator: NSObject, NSTextViewDelegate, NSTextStorageDelegate {
+    final class Coordinator: NSObject, NSTextViewDelegate, NSTextStorageDelegate, EditorTextViewDelegate {
         private let parent: MarkdownTextView
         let highlighter = SyntaxHighlighter()
+        private lazy var completion = WikilinkCompletion(index: parent.noteIndex)
         weak var textView: NSTextView?
         var textStorage: NSTextStorage?   // NSTextView/NSTextContainerはlayoutManagerを弱参照するため、これが無いと解放されて編集不能になる
         private var lastCursorLine: NSRange?
@@ -101,6 +104,11 @@ struct MarkdownTextView: NSViewRepresentable {
 
         init(_ parent: MarkdownTextView) {
             self.parent = parent
+            super.init()
+            highlighter.noteExists = { [weak noteIndex = parent.noteIndex] name in
+                // NSTextStorageDelegate/NSTextViewDelegate の呼び出しは常にメインスレッドなので安全
+                MainActor.assumeIsolated { noteIndex?.exists(name) ?? false }
+            }
         }
 
         /// `**` を打ち終えた時点で閉じの `**` を補い、カーソルを内側に置く
@@ -172,6 +180,35 @@ struct MarkdownTextView: NSViewRepresentable {
             let ms = (CFAbsoluteTimeGetCurrent() - t0) * 1000
             if ms > 8 { print("[latency] textDidChange \(String(format: "%.2f", ms))ms") }
             #endif
+
+            // ★ 変換中(下線が出ている状態)に complete(nil) を呼ぶと、変換候補ウィンドウと
+            //   補完ポップアップがぶつかって入力が壊れる。日本語環境ではほぼ必須のガード。
+            guard !textView.hasMarkedText() else { return }
+            let ns = textView.string as NSString
+            let cursor = textView.selectedRange().location
+            if completion.openBracketRange(in: ns, cursor: cursor) != nil {
+                textView.complete(nil)
+            }
+        }
+
+        func textView(
+            _ textView: NSTextView,
+            completions words: [String],
+            forPartialWordRange charRange: NSRange,
+            indexOfSelectedItem index: UnsafeMutablePointer<Int>?
+        ) -> [String] {
+            let ns = textView.string as NSString
+            guard completion.openBracketRange(in: ns, cursor: NSMaxRange(charRange)) != nil else {
+                return []      // wikilink 文脈でなければ標準の英単語補完を出さない
+            }
+            let query = ns.substring(with: charRange)
+            // NSTextViewDelegate の呼び出しは常にメインスレッド
+            return MainActor.assumeIsolated { completion.completions(for: query) }
+        }
+
+        func textView(_ textView: NSTextView, rangeForUserCompletion range: NSRange) -> NSRange {
+            let ns = textView.string as NSString
+            return completion.openBracketRange(in: ns, cursor: NSMaxRange(range)) ?? range
         }
 
         // NSTextStorage が編集を確定させた直後に呼ばれる。
@@ -227,6 +264,19 @@ struct MarkdownTextView: NSViewRepresentable {
             }
             highlighter.applySpans(to: storage, in: cursorLine, cursorLine: cursorLine)
             lastCursorLine = cursorLine
+        }
+
+        /// リンクをクリックしたときに呼ばれる。実際にノートを開く処理は Step 5b で差し替える
+        func editorTextView(_ tv: NSTextView, didClickWikilink name: String) {
+            // mouseDown からの呼び出しなので常にメインスレッド
+            MainActor.assumeIsolated {
+                if parent.noteIndex.exists(name) {
+                    print("[link] open: \(name) → \(parent.noteIndex.path(for: name) ?? "?")")
+                } else {
+                    print("[link] not found: \(name)")
+                    NSSound.beep()
+                }
+            }
         }
 
         private func scrollCurrentLineToCenter(_ textView: NSTextView) {

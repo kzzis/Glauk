@@ -22,11 +22,15 @@ struct EditorTypography {
         return NSFont.monospacedSystemFont(ofSize: base.pointSize, weight: .bold)
     }
     var accent = NSColor.systemRed      // Step 9 でテーマトークンに差し替え
+    var muted = NSColor.secondaryLabelColor
     var ink = NSColor.textColor
 }
 
 final class SyntaxHighlighter {
     private let typography: EditorTypography
+    /// 未作成ノートの区別表示に使う。Coordinator から NoteIndex を差し込む
+    var noteExists: (String) -> Bool = { _ in true }
+
     init(typography: EditorTypography = .init()) { self.typography = typography }
 
     /// 文書全体を再計算する(初期表示など)
@@ -51,6 +55,9 @@ final class SyntaxHighlighter {
 
         // bold_marker は開き・閉じの2個1組で来る(Zig側が閉じが見つかったときだけ両方を返すため)
         var pendingBoldOpen: Span?
+        // wikilink_target は wikilink_name より必ず先に来る(開始位置ソート済みのため)。
+        // 直前に見た target 名を覚えておけば、続く name の存在判定に使える。
+        var currentTargetName: String?
 
         for span in spans {
             guard NSMaxRange(span.range) <= storage.length else { continue }
@@ -80,12 +87,22 @@ final class SyntaxHighlighter {
             case .wikilinkHidden:
                 if !onCursorLine { storage.addAttribute(.glaukHidden, value: true, range: span.range) }
 
-            case .wikilinkName:
-                storage.addAttribute(.foregroundColor, value: typography.accent, range: span.range)
-
             case .wikilinkTarget:
                 let name = (storage.string as NSString).substring(with: span.range)
+                currentTargetName = name
                 storage.addAttribute(.glaukLinkTarget, value: name, range: span.range)
+
+            case .wikilinkName:
+                let exists = currentTargetName.map(noteExists) ?? false
+                if exists {
+                    storage.addAttribute(.foregroundColor, value: typography.accent, range: span.range)
+                } else {
+                    storage.addAttribute(.foregroundColor, value: typography.muted, range: span.range)
+                    storage.addAttribute(.underlineStyle,
+                                         value: NSUnderlineStyle.patternDot.rawValue
+                                              | NSUnderlineStyle.single.rawValue,
+                                         range: span.range)
+                }
             }
         }
         storage.endEditing()
