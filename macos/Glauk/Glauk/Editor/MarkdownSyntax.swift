@@ -6,6 +6,18 @@ enum SpanKind: UInt8 {
     case heading1 = 1, heading2 = 2, heading3 = 3
     case boldMarker = 4
     case wikilinkHidden = 5, wikilinkName = 6, wikilinkTarget = 7
+    case codeFence = 8, codeBlock = 9
+    case inlineCodeMarker = 10, inlineCode = 11
+    case frontmatter = 12
+    case listMarker = 13
+    case quoteMarker = 14, quoteText = 15
+    case italicMarker = 16
+    case strikeMarker = 17
+    case linkHidden = 18, linkText = 19, linkURL = 20
+    case hrule = 21
+    case codeKeyword = 22, codeString = 23, codeNumber = 24, codeComment = 25
+    case tableHeader = 26, tableRow = 27, tableDelimiter = 28, tablePipe = 29
+    case codeType = 30, codeFunction = 31, codeLang = 32
 }
 
 struct Span {
@@ -16,6 +28,24 @@ struct Span {
 extension NSAttributedString.Key {
     static let glaukHidden = NSAttributedString.Key("glauk.hidden")
     static let glaukLinkTarget = NSAttributedString.Key("glauk.linkTarget")
+    /// 通常のリンク `[text](url)` の URL
+    static let glaukLinkURL = NSAttributedString.Key("glauk.linkURL")
+    /// 引用の縦棒を描く範囲の目印(MarkdownLayoutManagerが背景描画で使う)
+    static let glaukQuote = NSAttributedString.Key("glauk.quote")
+    /// 区切り線を描く範囲の目印
+    static let glaukRule = NSAttributedString.Key("glauk.rule")
+    /// コードブロックの角丸背景を描く範囲
+    static let glaukCodeBlock = NSAttributedString.Key("glauk.codeBlock")
+    /// インラインコードの角丸背景を描く範囲
+    static let glaukInlineCode = NSAttributedString.Key("glauk.inlineCode")
+    /// テーブル全体の枠を描く範囲
+    static let glaukTable = NSAttributedString.Key("glauk.table")
+    /// テーブルの見出し行(下に区切り線を描く)
+    static let glaukTableHeader = NSAttributedString.Key("glauk.tableHeader")
+    /// コードブロックの言語名(ブロックの右上に描く)
+    static let glaukCodeLang = NSAttributedString.Key("glauk.codeLang")
+    /// テーブルの縦罫線を描く位置(`|` の文字に付ける)
+    static let glaukTablePipe = NSAttributedString.Key("glauk.tablePipe")
 }
 
 enum MarkdownParser {

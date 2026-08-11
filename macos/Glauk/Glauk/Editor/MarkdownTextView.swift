@@ -5,6 +5,9 @@ import AppKit
 struct MarkdownTextView: NSViewRepresentable {
     @Binding var text: String
     var noteIndex: NoteIndex
+    /// ファイルを開くたびに増える値。これが変わったら、テキストビューが
+    /// firstResponder中でも強制的に中身を差し替える(Step 4のファイル読み込み用)。
+    var loadRevision = 0
     var typewriterScroll: Bool = true
 
     func makeCoordinator() -> Coordinator {
@@ -14,6 +17,15 @@ struct MarkdownTextView: NSViewRepresentable {
     // 最初に1回だけ呼ばれる。ここでAppKit側を組み立てる
     func makeNSView(context: Context) -> NSScrollView {
         let layoutManager = MarkdownLayoutManager()
+        // 文字では表せない装飾(角丸・縦棒・罫線)を描くための色をハイライタと揃える
+        let typography = EditorTypography()
+        layoutManager.codeBgColor = typography.codeBg
+        layoutManager.codeLangColor = typography.codeLangLabel
+        layoutManager.codeCornerRadius = typography.codeCornerRadius
+        layoutManager.inlineCodeCornerRadius = typography.inlineCodeCornerRadius
+        layoutManager.quoteBarColor = typography.quoteBar
+        layoutManager.quoteBarWidth = typography.quoteBarWidth
+        layoutManager.tableRuleColor = typography.tableRule
         let storage = NSTextStorage()
         storage.delegate = context.coordinator
         storage.addLayoutManager(layoutManager)
@@ -40,6 +52,13 @@ struct MarkdownTextView: NSViewRepresentable {
         textView.isHorizontallyResizable = false
         textView.autoresizingMask = NSView.AutoresizingMask.width
         textView.textContainerInset = NSSize(width: 32, height: 32)
+        // ★ これが無いと maxSize は生成時のフレーム高さのまま = 表示領域の高さで頭打ちになり、
+        //   本文がそれより長くてもテキストビューが伸びない(実測: 本文2545ptに対しフレーム660pt)。
+        //   さらに scrollCurrentLineToCenter の maxY が 0 になるため、
+        //   スクロールしても常に先頭へ戻され「全体が見れない」状態になる。
+        textView.minSize = NSSize(width: 0, height: 0)
+        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude,
+                                  height: CGFloat.greatestFiniteMagnitude)
 
         textView.font = NSFont(name: "IBMPlexMono", size: 15)
             ?? NSFont.monospacedSystemFont(ofSize: 15, weight: .regular)
@@ -52,6 +71,7 @@ struct MarkdownTextView: NSViewRepresentable {
         textView.string = text
         context.coordinator.textView = textView
         context.coordinator.textStorage = storage   // ★ NSTextStorageの所有者がここしか無いので強参照で保持する
+        context.coordinator.lastLoadRevision = loadRevision
         context.coordinator.highlighter.apply(to: storage, cursorLine: nil)
 
         let scrollView = NSScrollView()
@@ -68,22 +88,29 @@ struct MarkdownTextView: NSViewRepresentable {
         //   下の `textView.string = text` はテキストビューを丸ごと置き換えるので、
         //   変換中に SwiftUI の再描画が挟まると未確定の文字列ごと消える。
         guard !textView.hasMarkedText() else { return }
-        guard textView.string != text else { return }   // ★ 無限ループ防止
 
-        // ★ 編集中はテキストビューが正。
-        //   SwiftUI から届く `text` は、テキストビューが既に持っている内容より
-        //   古いことがある(特に日本語変換は1文字ごとに何度も状態を更新するので、
-        //   確定がその更新列の間に挟まる)。古い値をここで代入すると、
-        //   いま確定したばかりの文字が消える。
-        //   外から流し込む必要が出てくるのは Step 4 のファイル読み込み以降で、
-        //   そのときは binding 経由ではなく明示的な読み込み経路を作ること。
-        let isEditing = textView.window?.firstResponder === textView
-        guard !isEditing else { return }
+        // ★ Step 4: ファイルを開いた直後は loadRevision が変わる。これは
+        //   「テキストビューの中身を丸ごと差し替える」意図が明確な操作なので、
+        //   firstResponder中でも(パネルを閉じてフォーカスが戻ってきていても)強制的に反映する。
+        let isNewDocument = context.coordinator.lastLoadRevision != loadRevision
+        guard isNewDocument || textView.string != text else { return }   // ★ 無限ループ防止
+
+        if !isNewDocument {
+            // ★ 編集中はテキストビューが正。
+            //   SwiftUI から届く `text` は、テキストビューが既に持っている内容より
+            //   古いことがある(特に日本語変換は1文字ごとに何度も状態を更新するので、
+            //   確定がその更新列の間に挟まる)。古い値をここで代入すると、
+            //   いま確定したばかりの文字が消える。
+            let isEditing = textView.window?.firstResponder === textView
+            guard !isEditing else { return }
+        }
+        context.coordinator.lastLoadRevision = loadRevision
 
         let selected = textView.selectedRange()
         textView.string = text
         let ns = text as NSString
-        let safeLocation = min(selected.location, ns.length)
+        // 新しいファイルを開いたときは先頭にカーソルを置く。同一文書内の更新は選択位置を保つ。
+        let safeLocation = isNewDocument ? 0 : min(selected.location, ns.length)
         textView.setSelectedRange(NSRange(location: safeLocation, length: 0))
         if let storage = textView.textStorage {
             // cursorLine を nil にするとカーソル行のマーカーまで隠れてしまう
@@ -98,6 +125,7 @@ struct MarkdownTextView: NSViewRepresentable {
         private lazy var completion = WikilinkCompletion(index: parent.noteIndex)
         weak var textView: NSTextView?
         var textStorage: NSTextStorage?   // NSTextView/NSTextContainerはlayoutManagerを弱参照するため、これが無いと解放されて編集不能になる
+        var lastLoadRevision: Int?
         private var lastCursorLine: NSRange?
         private var pendingEditedRange: NSRange?
         private var highlightScheduled = false

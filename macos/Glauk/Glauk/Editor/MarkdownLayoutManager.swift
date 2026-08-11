@@ -2,6 +2,138 @@
 import AppKit
 
 final class MarkdownLayoutManager: NSLayoutManager {
+    /// 引用の縦棒 / 区切り線の見た目。SyntaxHighlighter の EditorTypography と揃えること。
+    var quoteBarColor = NSColor.systemRed
+    var quoteBarWidth: CGFloat = 2
+    var ruleColor = NSColor.separatorColor
+    var codeBgColor = NSColor.textBackgroundColor
+    var codeLangColor = NSColor.tertiaryLabelColor
+    var codeCornerRadius: CGFloat = 6
+    var inlineCodeCornerRadius: CGFloat = 3
+    var tableRuleColor = NSColor.separatorColor
+
+    /// 属性が連続している範囲ごとに、その行たちを囲む矩形を返す
+    private func blockRects(for key: NSAttributedString.Key,
+                            in charRange: NSRange,
+                            origin: NSPoint) -> [(NSRange, NSRect)] {
+        guard let storage = textStorage else { return [] }
+        var result: [(NSRange, NSRect)] = []
+        storage.enumerateAttribute(key, in: charRange) { value, range, _ in
+            guard value != nil, range.length > 0 else { return }
+            let glyphs = glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+            var union: NSRect?
+            enumerateLineFragments(forGlyphRange: glyphs) { rect, _, _, _, _ in
+                union = union.map { $0.union(rect) } ?? rect
+            }
+            if let u = union {
+                result.append((range, u.offsetBy(dx: origin.x, dy: origin.y)))
+            }
+        }
+        return result
+    }
+
+    /// 文字では表せない装飾(引用の縦棒・区切り線)をここで描く。
+    /// テキストを書き換えずに見た目を足せるので、記法の文字列は原文のまま保てる。
+    override func drawBackground(forGlyphRange glyphsToShow: NSRange, at origin: NSPoint) {
+        super.drawBackground(forGlyphRange: glyphsToShow, at: origin)
+        guard let storage = textStorage, let container = textContainer(forGlyphAt: glyphsToShow.location,
+                                                                      effectiveRange: nil) else { return }
+        let charRange = characterRange(forGlyphRange: glyphsToShow, actualGlyphRange: nil)
+        let fullWidth = container.size.width - container.lineFragmentPadding * 2
+
+        // --- コードブロック: 横幅いっぱいの角丸で塗り、右上に言語名を出す ---
+        for (range, rect) in blockRects(for: .glaukCodeBlock, in: charRange, origin: origin) {
+            let box = NSRect(x: origin.x + container.lineFragmentPadding, y: rect.minY,
+                             width: fullWidth, height: rect.height)
+            codeBgColor.setFill()
+            NSBezierPath(roundedRect: box, xRadius: codeCornerRadius, yRadius: codeCornerRadius).fill()
+
+            // ```swift の "swift" をブロックの右上に小さく添える
+            var label: String?
+            storage.enumerateAttribute(.glaukCodeLang, in: range) { value, _, stop in
+                if let name = value as? String { label = name; stop.pointee = true }
+            }
+            if let label {
+                let attrs: [NSAttributedString.Key: Any] = [
+                    .font: NSFont.monospacedSystemFont(ofSize: 10, weight: .medium),
+                    .foregroundColor: codeLangColor,
+                ]
+                let text = label as NSString
+                let size = text.size(withAttributes: attrs)
+                text.draw(at: NSPoint(x: box.maxX - size.width - 10, y: box.minY + 6),
+                          withAttributes: attrs)
+            }
+        }
+
+        // --- インラインコード: 文字に沿った小さな角丸 ---
+        for (_, rect) in blockRects(for: .glaukInlineCode, in: charRange, origin: origin) {
+            let box = rect.insetBy(dx: -1, dy: 1)
+            codeBgColor.setFill()
+            NSBezierPath(roundedRect: box,
+                         xRadius: inlineCodeCornerRadius,
+                         yRadius: inlineCodeCornerRadius).fill()
+        }
+
+        // --- テーブル: 外枠 + 行の区切り(縦罫線は下の glaukTablePipe で描く) ---
+        for (range, rect) in blockRects(for: .glaukTable, in: charRange, origin: origin) {
+            let box = NSRect(x: origin.x + container.lineFragmentPadding, y: rect.minY,
+                             width: fullWidth, height: rect.height)
+            let path = NSBezierPath(roundedRect: box, xRadius: 4, yRadius: 4)
+            tableRuleColor.setStroke()
+            path.lineWidth = 1
+            path.stroke()
+
+            // 行と行の間に横罫線。たたんだ区切り行は高さが無いので飛ばす。
+            let glyphs = glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+            var fragments: [NSRect] = []
+            enumerateLineFragments(forGlyphRange: glyphs) { r, _, _, _, _ in
+                if r.height > 1 { fragments.append(r) }
+            }
+            tableRuleColor.setFill()
+            for fragment in fragments.dropLast() {
+                NSRect(x: box.minX, y: origin.y + fragment.maxY, width: fullWidth, height: 1).fill()
+            }
+        }
+
+        // --- テーブルの縦罫線: 透明にした `|` の位置に引く ---
+        storage.enumerateAttribute(.glaukTablePipe, in: charRange) { value, range, _ in
+            guard value != nil else { return }
+            let glyphs = glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+            let rect = boundingRect(forGlyphRange: glyphs, in: container)
+            guard rect.width > 0 else { return }
+            let x = (origin.x + rect.midX).rounded()
+            let bar = NSRect(x: x, y: origin.y + rect.minY, width: 1, height: rect.height)
+            self.tableRuleColor.setFill()
+            bar.fill()
+        }
+
+        storage.enumerateAttribute(.glaukQuote, in: charRange) { value, range, _ in
+            guard value != nil else { return }
+            let glyphs = glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+            enumerateLineFragments(forGlyphRange: glyphs) { rect, _, _, _, _ in
+                let bar = NSRect(x: origin.x + rect.minX + 4,
+                                 y: origin.y + rect.minY + 2,
+                                 width: self.quoteBarWidth,
+                                 height: rect.height - 4)
+                self.quoteBarColor.setFill()
+                bar.fill()
+            }
+        }
+
+        storage.enumerateAttribute(.glaukRule, in: charRange) { value, range, _ in
+            guard value != nil else { return }
+            let glyphs = glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+            enumerateLineFragments(forGlyphRange: glyphs) { rect, _, _, _, _ in
+                let line = NSRect(x: origin.x + rect.minX,
+                                  y: origin.y + rect.midY,
+                                  width: container.size.width - 8,
+                                  height: 1)
+                self.ruleColor.setFill()
+                line.fill()
+            }
+        }
+    }
+
     override func setGlyphs(
         _ glyphs: UnsafePointer<CGGlyph>,
         properties props: UnsafePointer<NSLayoutManager.GlyphProperty>,
