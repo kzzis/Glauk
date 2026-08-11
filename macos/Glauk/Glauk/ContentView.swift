@@ -3,11 +3,32 @@ import SwiftUI
 
 struct ContentView: View {
     @StateObject private var noteIndex = NoteIndex()
-    @State private var text = "# 見出し\n\n本文を書く。**太字** も試す。\n\n[[AS400アイテムマスタ]] と [[存在しないノート]] を並べる。\n"
+    @StateObject private var document = DocumentStore()
 
     var body: some View {
-        MarkdownTextView(text: $text, noteIndex: noteIndex)
-            .frame(minWidth: 900, minHeight: 700)
-            .onAppear { noteIndex.loadMock() }
+        VStack(spacing: 0) {
+            HStack {
+                Button("開く…") { document.openWithPanel() }
+                Button("新規…") { document.createWithPanel() }
+                if let path = document.path {
+                    Text(path)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.head)
+                }
+                Spacer()
+                if let error = document.lastError {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+            }
+            .padding(8)
+
+            MarkdownTextView(text: $document.text, noteIndex: noteIndex)
+        }
+        .frame(minWidth: 900, minHeight: 700)
+        .onAppear { noteIndex.loadMock() }
     }
 }
