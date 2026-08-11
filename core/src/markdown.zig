@@ -430,9 +430,9 @@ fn scanAll(gpa: std.mem.Allocator, text: []const u8, out: *std.ArrayList(ByteSpa
             in_fence = !in_fence;
         } else if (in_fence) {
             // ★ コードブロックの中身は Markdown として解釈しない(scanLineを呼ばない)
-            if (line.len > 0) {
-                try out.append(gpa, .{ .start = line_start, .len = line.len, .kind = .code_block });
-            }
+            //   空行にもスパンを出す。出さないと Swift 側で目印が途切れ、
+            //   1つのブロックが空行のところで複数の箱に割れてしまう。
+            try out.append(gpa, .{ .start = line_start, .len = line.len, .kind = .code_block });
             // シンタックスハイライト。code_block を先に入れてあるので、
             // 同じ位置ではブロック→トークンの順に適用される(ソートは安定)。
             tokens.clearRetainingCapacity();
@@ -624,6 +624,14 @@ test "unclosed backtick is ignored" {
     try testing.expectEqual(@as(usize, 0), spans.len);
 }
 
+test "a blank line inside a fence still gets a span" {
+    const gpa = testing.allocator;
+    // 空行にスパンが無いと、Swift側で目印が途切れてブロックが割れて見える
+    const spans = try parse(gpa, "```\na\n\nb\n```\n");
+    defer gpa.free(spans);
+    try testing.expectEqual(@as(usize, 3), kindsOf(spans, .code_block)); // a / 空行 / b
+}
+
 test "fenced block hides the fences and marks the body" {
     const gpa = testing.allocator;
     const spans = try parse(gpa, "```swift\nlet x = 1\n```\n");
@@ -663,9 +671,11 @@ test "an unclosed fence keeps the rest of the document as code" {
     const spans = try parse(gpa, "```\n# still code\n");
     defer gpa.free(spans);
 
-    try testing.expectEqual(@as(usize, 2), spans.len);
+    try testing.expectEqual(@as(usize, 1), kindsOf(spans, .code_fence));
     try testing.expectEqual(@intFromEnum(SpanKind.code_fence), spans[0].kind);
     try testing.expectEqual(@intFromEnum(SpanKind.code_block), spans[1].kind);
+    // 空行にもスパンを出すので、末尾の空行の分も含まれる
+    try testing.expect(kindsOf(spans, .code_block) >= 1);
 }
 
 test "frontmatter is one span covering the closing fence and its newline" {

@@ -44,6 +44,8 @@ struct EditorTypography {
     /// 「たたむ」ためのフォント。グリフを消すだけでは行が1行分残るため(実測: 4行が1行分残った)、
     /// 極小フォントを併用して行の高さごと潰す。
     var folded = NSFont.systemFont(ofSize: 0.01)
+    /// 隠した ``` の行に使う。行は残るので、これがブロック上下の余白の高さになる。
+    var codePadding = NSFont.systemFont(ofSize: 7)
 
     /// 斜体は「フォントの差し替え」ではなく「傾き」で表す。
     /// ★ 日本語には斜体を持つフォントが無いため、斜体フォントを指定しても AppKit の
@@ -299,7 +301,11 @@ final class SyntaxHighlighter {
                 let lineRange = (storage.string as NSString).lineRange(for: span.range)
                 storage.addAttribute(.glaukCodeBlock, value: true, range: lineRange)
                 storage.addAttribute(.paragraphStyle, value: typography.codeParagraph, range: lineRange)
-                if !onCursorLine { storage.addAttribute(.glaukHidden, value: true, range: span.range) }
+                if !onCursorLine {
+                    storage.addAttribute(.glaukHidden, value: true, range: span.range)
+                    // 行を残したままだと1行分の余白になって間延びするので、小さくして詰める
+                    storage.addAttribute(.font, value: typography.codePadding, range: lineRange)
+                }
 
             case .codeBlock:
                 let lineRange = (storage.string as NSString).lineRange(for: span.range)
