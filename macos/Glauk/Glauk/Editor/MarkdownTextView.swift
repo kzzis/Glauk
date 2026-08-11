@@ -20,6 +20,7 @@ struct MarkdownTextView: NSViewRepresentable {
         // 文字では表せない装飾(角丸・縦棒・罫線)を描くための色をハイライタと揃える
         let typography = EditorTypography()
         layoutManager.codeBgColor = typography.codeBg
+        layoutManager.codeLangColor = typography.codeLangLabel
         layoutManager.codeCornerRadius = typography.codeCornerRadius
         layoutManager.inlineCodeCornerRadius = typography.inlineCodeCornerRadius
         layoutManager.quoteBarColor = typography.quoteBar

@@ -1,6 +1,19 @@
 // SyntaxHighlighter.swift
 import AppKit
 
+/// ライト/ダークで色を切り替える。Step 9 で Asset Catalog のColor Setに移す。
+func dynamicColor(dark: UInt32, light: UInt32) -> NSColor {
+    func make(_ hex: UInt32) -> NSColor {
+        NSColor(srgbRed: CGFloat((hex >> 16) & 0xFF) / 255,
+                green: CGFloat((hex >> 8) & 0xFF) / 255,
+                blue: CGFloat(hex & 0xFF) / 255,
+                alpha: 1)
+    }
+    return NSColor(name: nil) { appearance in
+        appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? make(dark) : make(light)
+    }
+}
+
 struct EditorTypography {
     /// MarkdownTextView が textView.font に入れているものと必ず揃えること。
     /// ここがズレると applySpans が全文の .font を上書きしてしまい、等幅で書いているつもりが
@@ -40,11 +53,15 @@ struct EditorTypography {
     var italicObliqueness: CGFloat = 0.2
 
     // --- コードのシンタックスハイライト ---
-    // システムのセマンティックカラーを使い、ライト/ダークに自動で追従させる
-    var codeKeyword = NSColor.systemPurple
-    var codeString = NSColor.systemGreen
-    var codeNumber = NSColor.systemOrange
+    // ライト/ダークで色を切り替える。暗い側は GitHub Dark 系の配色に寄せている。
+    var codeKeyword = dynamicColor(dark: 0xFF7B72, light: 0xCF222E) // var / let など
+    var codeType = dynamicColor(dark: 0x4EC9B0, light: 0x0F766E) // 大文字始まりの識別子
+    var codeFunction = dynamicColor(dark: 0x79C0FF, light: 0x0969DA) // 呼び出し
+    var codeString = dynamicColor(dark: 0xE3B341, light: 0x8B5000)
+    var codeNumber = dynamicColor(dark: 0xFFA657, light: 0xB35900)
     var codeComment = NSColor.secondaryLabelColor
+    /// ブロック右上に出す言語名
+    var codeLangLabel = NSColor.tertiaryLabelColor
 
     /// 引用の縦棒の色と太さ
     var quoteBar = NSColor.systemRed
@@ -74,10 +91,10 @@ struct EditorTypography {
     /// コードブロック / テーブルは角丸の内側に余白を作り、行間も詰める
     var codeParagraph: NSParagraphStyle = {
         let p = NSMutableParagraphStyle()
-        p.lineHeightMultiple = 1.25
-        p.firstLineHeadIndent = 12
-        p.headIndent = 12
-        p.tailIndent = -12
+        p.lineHeightMultiple = 1.35
+        p.firstLineHeadIndent = 20
+        p.headIndent = 20
+        p.tailIndent = -20
         return p
     }()
 
@@ -87,12 +104,7 @@ struct EditorTypography {
     /// テーブルの罫線
     var tableRule = NSColor.separatorColor
     /// glauk-design-doc.md の CodeBg(Light #EFEDE8 / Dark #26262A)
-    var codeBg = NSColor(name: nil) { appearance in
-        let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-        return isDark
-            ? NSColor(srgbRed: 0x26 / 255, green: 0x26 / 255, blue: 0x2A / 255, alpha: 1)
-            : NSColor(srgbRed: 0xEF / 255, green: 0xED / 255, blue: 0xE8 / 255, alpha: 1)
-    }
+    var codeBg = dynamicColor(dark: 0x26262A, light: 0xEFEDE8)
 }
 
 final class SyntaxHighlighter {
@@ -246,6 +258,15 @@ final class SyntaxHighlighter {
                 storage.addAttribute(.foregroundColor, value: typography.codeNumber, range: span.range)
             case .codeComment:
                 storage.addAttribute(.foregroundColor, value: typography.codeComment, range: span.range)
+            case .codeType:
+                storage.addAttribute(.foregroundColor, value: typography.codeType, range: span.range)
+            case .codeFunction:
+                storage.addAttribute(.foregroundColor, value: typography.codeFunction, range: span.range)
+
+            case .codeLang:
+                // 文字自体はフェンス行ごと隠れる。ブロックの右上に描くために覚えておく。
+                let name = (storage.string as NSString).substring(with: span.range)
+                storage.addAttribute(.glaukCodeLang, value: name, range: span.range)
 
             case .wikilinkHidden:
                 if !onCursorLine { storage.addAttribute(.glaukHidden, value: true, range: span.range) }
@@ -302,8 +323,10 @@ final class SyntaxHighlighter {
                 let lineRange = (storage.string as NSString).lineRange(for: span.range)
                 storage.addAttribute(.glaukTable, value: true, range: lineRange)
                 if !onCursorLine {
-                    storage.addAttribute(.glaukHidden, value: true, range: span.range)
-                    storage.addAttribute(.font, value: typography.folded, range: span.range)
+                    // ★ 極小フォントは改行まで含めて掛ける。行の中身だけだと、
+                    //   末尾の改行が本文サイズのまま残って1行分の隙間になる。
+                    storage.addAttribute(.glaukHidden, value: true, range: lineRange)
+                    storage.addAttribute(.font, value: typography.folded, range: lineRange)
                 }
 
             case .tablePipe:

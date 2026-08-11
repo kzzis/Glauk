@@ -17,6 +17,7 @@ enum SpanKind: UInt8 {
     case hrule = 21
     case codeKeyword = 22, codeString = 23, codeNumber = 24, codeComment = 25
     case tableHeader = 26, tableRow = 27, tableDelimiter = 28, tablePipe = 29
+    case codeType = 30, codeFunction = 31, codeLang = 32
 }
 
 struct Span {
@@ -41,6 +42,8 @@ extension NSAttributedString.Key {
     static let glaukTable = NSAttributedString.Key("glauk.table")
     /// テーブルの見出し行(下に区切り線を描く)
     static let glaukTableHeader = NSAttributedString.Key("glauk.tableHeader")
+    /// コードブロックの言語名(ブロックの右上に描く)
+    static let glaukCodeLang = NSAttributedString.Key("glauk.codeLang")
 }
 
 enum MarkdownParser {

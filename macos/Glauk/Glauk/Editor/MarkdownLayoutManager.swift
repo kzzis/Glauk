@@ -7,6 +7,7 @@ final class MarkdownLayoutManager: NSLayoutManager {
     var quoteBarWidth: CGFloat = 2
     var ruleColor = NSColor.separatorColor
     var codeBgColor = NSColor.textBackgroundColor
+    var codeLangColor = NSColor.tertiaryLabelColor
     var codeCornerRadius: CGFloat = 6
     var inlineCodeCornerRadius: CGFloat = 3
     var tableRuleColor = NSColor.separatorColor
@@ -40,12 +41,28 @@ final class MarkdownLayoutManager: NSLayoutManager {
         let charRange = characterRange(forGlyphRange: glyphsToShow, actualGlyphRange: nil)
         let fullWidth = container.size.width - container.lineFragmentPadding * 2
 
-        // --- コードブロック: 横幅いっぱいの角丸で塗る(Obsidianと同じ見た目) ---
-        for (_, rect) in blockRects(for: .glaukCodeBlock, in: charRange, origin: origin) {
+        // --- コードブロック: 横幅いっぱいの角丸で塗り、右上に言語名を出す ---
+        for (range, rect) in blockRects(for: .glaukCodeBlock, in: charRange, origin: origin) {
             let box = NSRect(x: origin.x + container.lineFragmentPadding, y: rect.minY,
                              width: fullWidth, height: rect.height)
             codeBgColor.setFill()
             NSBezierPath(roundedRect: box, xRadius: codeCornerRadius, yRadius: codeCornerRadius).fill()
+
+            // ```swift の "swift" をブロックの右上に小さく添える
+            var label: String?
+            storage.enumerateAttribute(.glaukCodeLang, in: range) { value, _, stop in
+                if let name = value as? String { label = name; stop.pointee = true }
+            }
+            if let label {
+                let attrs: [NSAttributedString.Key: Any] = [
+                    .font: NSFont.monospacedSystemFont(ofSize: 10, weight: .medium),
+                    .foregroundColor: codeLangColor,
+                ]
+                let text = label as NSString
+                let size = text.size(withAttributes: attrs)
+                text.draw(at: NSPoint(x: box.maxX - size.width - 10, y: box.minY + 6),
+                          withAttributes: attrs)
+            }
         }
 
         // --- インラインコード: 文字に沿った小さな角丸 ---

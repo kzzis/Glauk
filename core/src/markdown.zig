@@ -33,6 +33,9 @@ pub const SpanKind = enum(u8) {
     table_row = 27, // 本文の行
     table_delimiter = 28, // |---|:--| の行(たたむ)
     table_pipe = 29, // 区切りの |
+    code_type = 30, // 大文字始まりの識別子
+    code_function = 31, // 直後が ( の識別子
+    code_lang = 32, // ```swift の "swift"(ブロックの右上に表示する)
 };
 
 /// Swiftに渡す構造体。UTF-16コードユニット単位。
@@ -409,8 +412,20 @@ fn scanAll(gpa: std.mem.Allocator, text: []const u8, out: *std.ArrayList(ByteSpa
             try out.append(gpa, .{ .start = line_start, .len = line.len, .kind = .code_fence });
             if (!in_fence) {
                 // ```swift の "swift" から言語を決める
-                lang = syntax.langFromInfo(line[indent + 3 ..]);
+                const info_start = indent + 3;
+                lang = syntax.langFromInfo(line[info_start..]);
                 in_block_comment = false;
+                // 言語名はブロックの右上に出すので、範囲を覚えておく
+                const info = std.mem.trim(u8, line[info_start..], " \t\r");
+                if (info.len > 0) {
+                    const word_len = std.mem.indexOfAny(u8, info, " \t{:") orelse info.len;
+                    const offset = @intFromPtr(info.ptr) - @intFromPtr(line.ptr);
+                    try out.append(gpa, .{
+                        .start = line_start + offset,
+                        .len = word_len,
+                        .kind = .code_lang,
+                    });
+                }
             }
             in_fence = !in_fence;
         } else if (in_fence) {
@@ -431,6 +446,8 @@ fn scanAll(gpa: std.mem.Allocator, text: []const u8, out: *std.ArrayList(ByteSpa
                         .string => .code_string,
                         .number => .code_number,
                         .comment => .code_comment,
+                        .type_name => .code_type,
+                        .function => .code_function,
                     },
                 });
             }
@@ -612,13 +629,22 @@ test "fenced block hides the fences and marks the body" {
     const spans = try parse(gpa, "```swift\nlet x = 1\n```\n");
     defer gpa.free(spans);
 
-    // フェンス2つ + 中身1行(+ 中身のシンタックストークン)
+    // フェンス2つ + 中身1行(+ 言語名と中身のシンタックストークン)
     try testing.expectEqual(@as(usize, 2), kindsOf(spans, .code_fence));
     try testing.expectEqual(@as(usize, 1), kindsOf(spans, .code_block));
+    try testing.expectEqual(@as(usize, 1), kindsOf(spans, .code_lang));
     try testing.expectEqual(@intFromEnum(SpanKind.code_fence), spans[0].kind);
     try testing.expectEqual(@as(u32, 8), spans[0].len); // "```swift"
-    try testing.expectEqual(@intFromEnum(SpanKind.code_block), spans[1].kind);
-    try testing.expectEqual(@as(u32, 9), spans[1].len); // "let x = 1"
+
+    var block: ?Span = null;
+    var lang: ?Span = null;
+    for (spans) |s| {
+        if (s.kind == @intFromEnum(SpanKind.code_block)) block = s;
+        if (s.kind == @intFromEnum(SpanKind.code_lang)) lang = s;
+    }
+    try testing.expectEqual(@as(u32, 9), block.?.len); // "let x = 1"
+    try testing.expectEqual(@as(u32, 3), lang.?.start); // "swift" は ``` の直後
+    try testing.expectEqual(@as(u32, 5), lang.?.len);
 }
 
 test "markdown inside a fenced block is not parsed" {

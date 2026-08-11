@@ -4,7 +4,7 @@
 //! だけを拾う。行単位で処理し、ブロックコメントだけ行をまたぐ状態を持つ。
 const std = @import("std");
 
-pub const TokenKind = enum { keyword, string, number, comment };
+pub const TokenKind = enum { keyword, string, number, comment, type_name, function };
 
 pub const Token = struct {
     start: usize,
@@ -86,6 +86,11 @@ const c_kw = [_][]const u8{
     "signed", "sizeof", "static", "struct", "switch", "template", "this", "throw",
     "true",   "try",    "typedef", "typename", "union", "unsigned", "using", "virtual",
     "void",   "volatile", "while", "final", "import", "package", "super",
+    // C# でよく出るもの
+    "var",    "string", "object", "async",  "await",  "override", "abstract", "readonly",
+    "internal", "params", "out",  "ref",    "is",     "as",     "in",     "foreach",
+    "lock",   "yield",  "get",    "set",    "record", "partial", "sealed", "base",
+    "null",   "when",   "where",  "nameof", "typeof",
 };
 
 const bash_kw = [_][]const u8{
@@ -262,12 +267,23 @@ pub fn tokenizeLine(
             continue;
         }
 
-        // --- 識別子 → キーワードなら色を付ける ---
+        // --- 識別子 → キーワード / 型 / 関数 ---
         if (isIdentStart(c)) {
             var j = i;
             while (j < line.len and isIdentPart(line[j])) j += 1;
-            if (isKeyword(lang, line[i..j])) {
-                try out.append(gpa, .{ .start = base + i, .len = j - i, .kind = .keyword });
+            const word = line[i..j];
+            const kind: ?TokenKind = if (isKeyword(lang, word))
+                .keyword
+            else if (j < line.len and line[j] == '(')
+                // 直後が `(` なら呼び出し・定義とみなす
+                .function
+            else if (std.ascii.isUpper(word[0]))
+                // 大文字始まりは型とみなす。厳密ではないが見た目には十分効く
+                .type_name
+            else
+                null;
+            if (kind) |k| {
+                try out.append(gpa, .{ .start = base + i, .len = j - i, .kind = k });
             }
             i = j;
             continue;
@@ -296,6 +312,26 @@ test "keywords, strings and numbers are picked up" {
     try testing.expectEqual(TokenKind.keyword, toks[0].kind); // let
     try testing.expectEqual(TokenKind.number, toks[1].kind); // 42
     try testing.expectEqual(TokenKind.string, toks[2].kind); // "hi"
+}
+
+test "uppercase identifiers are types and identifiers before ( are functions" {
+    const gpa = testing.allocator;
+    var in_block = false;
+    const toks = try collect(gpa, "var b = WebApplication.CreateBuilder(args);",
+                             langFromInfo("cs"), &in_block);
+    defer gpa.free(toks);
+
+    try testing.expectEqual(TokenKind.keyword, toks[0].kind); // var
+    try testing.expectEqual(TokenKind.type_name, toks[1].kind); // WebApplication
+    try testing.expectEqual(TokenKind.function, toks[2].kind); // CreateBuilder
+}
+
+test "a lowercase identifier that is not a call gets no token" {
+    const gpa = testing.allocator;
+    var in_block = false;
+    const toks = try collect(gpa, "builder.things", langFromInfo("cs"), &in_block);
+    defer gpa.free(toks);
+    try testing.expectEqual(@as(usize, 0), toks.len);
 }
 
 test "a line comment swallows the rest of the line" {
