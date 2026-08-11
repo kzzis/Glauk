@@ -10,6 +10,9 @@ final class DocumentStore: ObservableObject {
     }
     @Published private(set) var path: String?
     @Published private(set) var lastError: String?
+    /// open() のたびに増える。MarkdownTextView はこれの変化を「差し替え」の合図として使う。
+    /// (テキストビューがfirstResponderのままだと通常のbinding経由の更新は無視されるため)
+    @Published private(set) var revision = 0
 
     private var saveTask: Task<Void, Never>?
     private var suppressAutosave = false
@@ -24,6 +27,7 @@ final class DocumentStore: ObservableObject {
         suppressAutosave = true      // 読み込みで保存が走らないように
         path = newPath
         text = contents
+        revision += 1
         suppressAutosave = false
     }
 

@@ -26,7 +26,7 @@ struct ContentView: View {
             }
             .padding(8)
 
-            MarkdownTextView(text: $document.text, noteIndex: noteIndex)
+            MarkdownTextView(text: $document.text, noteIndex: noteIndex, loadRevision: document.revision)
         }
         .frame(minWidth: 900, minHeight: 700)
         .onAppear { noteIndex.loadMock() }
