@@ -16,29 +16,42 @@ export fn glauk_read_file(path: [*:0]const u8, out_len: *usize) callconv(.c) ?[*
 
 export fn glauk_write_file(path: [*:0]const u8, data: [*]const u8, len: usize) callconv(.c) bool {
     const p = std.mem.span(path);
+
+    if (writeAtomic(p, data[0..len])) {
+        watch.glauk_mark_self_write();
+        return true;
+    } else |err| {
+        // App Sandbox は NSSavePanel/NSOpenPanel で選ばれた「そのファイル名」にしか
+        // 書き込み権限を与えない。atomicFile は同じディレクトリに別名の一時ファイルを
+        // 作るため、Downloads や iCloud Drive のような場所では PermissionDenied になる。
+        // その場合は安全性より「保存できること」を優先し、直接上書きにフォールバックする。
+        std.debug.print("[glauk] atomic write failed for \"{s}\": {s}; falling back to direct write\n", .{ p, @errorName(err) });
+    }
+
+    if (writeDirect(p, data[0..len])) {
+        watch.glauk_mark_self_write();
+        return true;
+    } else |err| {
+        std.debug.print("[glauk] direct write failed for \"{s}\": {s}\n", .{ p, @errorName(err) });
+        return false;
+    }
+}
+
+fn writeAtomic(path: []const u8, data: []const u8) !void {
     var buf: [4096]u8 = undefined;
-
-    var af = std.fs.cwd().atomicFile(p, .{ .write_buffer = &buf }) catch |err| {
-        std.debug.print("[glauk] atomicFile failed for \"{s}\": {s}\n", .{ p, @errorName(err) });
-        return false;
-    };
+    var af = try std.fs.cwd().atomicFile(path, .{ .write_buffer = &buf });
     defer af.deinit();
+    try af.file_writer.interface.writeAll(data);
+    try af.finish();
+}
 
-    af.file_writer.interface.writeAll(data[0..len]) catch |err| {
-        std.debug.print("[glauk] writeAll failed for \"{s}\": {s}\n", .{ p, @errorName(err) });
-        return false;
-    };
-    af.file_writer.interface.flush() catch |err| {
-        std.debug.print("[glauk] flush failed for \"{s}\": {s}\n", .{ p, @errorName(err) });
-        return false;
-    };
-    af.finish() catch |err| {
-        std.debug.print("[glauk] finish failed for \"{s}\": {s}\n", .{ p, @errorName(err) });
-        return false;
-    };
-
-    watch.glauk_mark_self_write();
-    return true;
+fn writeDirect(path: []const u8, data: []const u8) !void {
+    var buf: [4096]u8 = undefined;
+    var file = try std.fs.cwd().createFile(path, .{ .truncate = true });
+    defer file.close();
+    var writer = file.writer(&buf);
+    try writer.interface.writeAll(data);
+    try writer.interface.flush();
 }
 
 export fn glauk_file_mtime_ms(path: [*:0]const u8) callconv(.c) i64 {
