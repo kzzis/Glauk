@@ -152,6 +152,7 @@ final class SyntaxHighlighter {
         storage.removeAttribute(.glaukLinkURL, range: scope)
         storage.removeAttribute(.obliqueness, range: scope)
         storage.removeAttribute(.strikethroughStyle, range: scope)
+        storage.removeAttribute(.kern, range: scope)   // テーブルの桁揃えをやり直すため
         storage.addAttribute(.paragraphStyle, value: typography.bodyParagraph, range: scope)
 
         // marker は開き・閉じの2個1組で来る(Zig側が閉じが見つかったときだけ両方を返すため)
@@ -345,7 +346,123 @@ final class SyntaxHighlighter {
                 }
             }
         }
+        alignTables(in: storage, scope: scope)
         storage.endEditing()
+    }
+
+    // MARK: - テーブルの桁揃え
+
+    /// 原文のセル幅はばらばらなので、そのまま出すと `|` の位置が揃わない。
+    /// テキストは書き換えられないので、各セルの最後の文字に kern(字送り)を足して
+    /// 列の幅を揃える。kern はその文字の「後ろ」に空きを作るので、次の `|` が右へ動く。
+    private func alignTables(in storage: NSTextStorage, scope: NSRange) {
+        let ns = storage.string as NSString
+        var tables: [NSRange] = []
+        storage.enumerateAttribute(.glaukTable, in: scope) { value, range, _ in
+            if value != nil, range.length > 0 { tables.append(range) }
+        }
+        guard !tables.isEmpty else { return }
+
+        // 折り返すと桁揃えの意味が無くなるので、収まらないときは揃えない
+        let containerWidth = storage.layoutManagers.first?.textContainers.first?.size.width ?? 0
+        let available = containerWidth - typography.codeParagraph.firstLineHeadIndent
+            + typography.codeParagraph.tailIndent
+
+        for table in tables {
+            alignTable(in: storage, ns: ns, table: table, available: available)
+        }
+    }
+
+    private func alignTable(in storage: NSTextStorage, ns: NSString,
+                            table: NSRange, available: CGFloat) {
+        // 行に分ける
+        var lines: [NSRange] = []
+        var p = table.location
+        while p < NSMaxRange(table) {
+            let line = ns.lineRange(for: NSRange(location: p, length: 0))
+            lines.append(line)
+            if line.length == 0 { break }
+            p = NSMaxRange(line)
+        }
+
+        // 区切り行を除いた行について、`|` の位置と「行頭からそこまでの幅」を測る。
+        // ★ セルを個別に測って足し合わせると、境目ごとの丸めが積もって数ptずれる。
+        //   行頭からの累積で測り、各 `|` を目標位置へ直接合わせる。
+        struct Row {
+            var pipes: [Int]
+            var prefix: [CGFloat]   // 行頭から pipes[k] の直前までの幅
+        }
+        var rows: [Row] = []
+        for line in lines {
+            if isTableDelimiterLine(ns.substring(with: line)) { continue }
+            var pipes: [Int] = []
+            for i in 0..<line.length where ns.character(at: line.location + i) == pipeChar {
+                pipes.append(line.location + i)
+            }
+            guard pipes.count >= 2 else { continue }
+            let prefix = pipes.map { p -> CGFloat in
+                let r = NSRange(location: line.location, length: p - line.location)
+                return r.length > 0 ? typesetWidth(storage.attributedSubstring(from: r)) : 0
+            }
+            rows.append(Row(pipes: pipes, prefix: prefix))
+        }
+        guard rows.count >= 2 else { return }   // 見出しだけの表は揃えなくてよい
+
+        // 列の幅 = 「`|` から次の `|` まで」の最大値
+        let segmentCount = (rows.map { $0.pipes.count }.max() ?? 1) - 1
+        guard segmentCount > 0 else { return }
+        var segment = [CGFloat](repeating: 0, count: segmentCount)
+        for row in rows {
+            for c in 0..<(row.pipes.count - 1) {
+                segment[c] = Swift.max(segment[c], row.prefix[c + 1] - row.prefix[c])
+            }
+        }
+
+        // 折り返すと桁揃えの意味が無くなるので、収まらないときは揃えない
+        let total = segment.reduce(0, +)
+        guard available <= 0 || total <= available else { return }
+
+        for row in rows {
+            var applied: CGFloat = 0     // これまでに足した字送りの合計
+            var target = row.prefix[0]   // 1本目の `|` は動かさない
+            for k in 1..<row.pipes.count {
+                target += segment[k - 1]
+                let extra = target - row.prefix[k] - applied
+                guard extra > 0.5 else { continue }
+                // 字送りは直前の1文字の「後ろ」に空きを作る
+                let at = NSRange(location: row.pipes[k] - 1, length: 1)
+                guard at.location >= 0, NSMaxRange(at) <= storage.length else { continue }
+                storage.addAttribute(.kern, value: extra, range: at)
+                applied += extra
+            }
+        }
+    }
+
+    /// 実際の組版と同じ幅を測る。
+    /// NSAttributedString.size() はレイアウトマネージャの結果と数pt ずれるため、
+    /// 桁揃えに使うと `|` の位置が揃いきらない(実測で最大5ptずれた)。
+    private func typesetWidth(_ attributed: NSAttributedString) -> CGFloat {
+        guard attributed.length > 0 else { return 0 }
+        let line = CTLineCreateWithAttributedString(attributed)
+        return CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil))
+    }
+
+    private let pipeChar = unichar(UInt8(ascii: "|"))
+
+    /// `|---|:--:|` の行か
+    private func isTableDelimiterLine(_ line: String) -> Bool {
+        let t = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty else { return false }
+        var hasDash = false, hasPipe = false
+        for ch in t {
+            switch ch {
+            case "-": hasDash = true
+            case "|": hasPipe = true
+            case ":", " ", "\t": break
+            default: return false
+            }
+        }
+        return hasDash && hasPipe
     }
 
     /// 変更のあった範囲を含む段落だけを再計算する
@@ -369,7 +486,41 @@ final class SyntaxHighlighter {
            NSIntersectionRange(fm, scope).length > 0 || scope.location <= NSMaxRange(fm) {
             result = result.union(fm)
         }
+        // ★ テーブルは列幅を全行から決めるので、途中で切ると桁揃えが狂う
+        if let table = tableRange(in: ns, touching: scope) {
+            result = result.union(table)
+        }
         return result.clamped(to: ns.length)
+    }
+
+    /// `scope` に掛かるテーブル(`|` を含む行の連なり)の全体を返す
+    private func tableRange(in ns: NSString, touching scope: NSRange) -> NSRange? {
+        guard ns.length > 0 else { return nil }
+        let start = Swift.min(scope.location, ns.length)
+        var first = ns.lineRange(for: NSRange(location: start, length: 0))
+        guard ns.substring(with: first).contains("|") else { return nil }
+
+        // 上へ
+        while first.location > 0 {
+            let prev = ns.lineRange(for: NSRange(location: first.location - 1, length: 0))
+            guard ns.substring(with: prev).contains("|") else { break }
+            first = prev.union(first)
+        }
+        // 下へ
+        var last = ns.lineRange(for: NSRange(location: Swift.min(NSMaxRange(scope), ns.length - 1),
+                                             length: 0))
+        while NSMaxRange(last) < ns.length {
+            let next = ns.lineRange(for: NSRange(location: NSMaxRange(last), length: 0))
+            guard ns.substring(with: next).contains("|") else { break }
+            last = last.union(next)
+        }
+        let block = first.union(last)
+        // 2行目が区切り行でなければテーブルではない
+        let head = ns.lineRange(for: NSRange(location: block.location, length: 0))
+        guard NSMaxRange(head) < NSMaxRange(block) else { return nil }
+        let second = ns.lineRange(for: NSRange(location: NSMaxRange(head), length: 0))
+        guard isTableDelimiterLine(ns.substring(with: second)) else { return nil }
+        return block
     }
 
     /// 文書先頭の `---` … `---`(閉じの改行まで)。Zig の frontmatterEnd と同じ判定。
