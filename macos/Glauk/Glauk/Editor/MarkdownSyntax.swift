@@ -16,6 +16,7 @@ enum SpanKind: UInt8 {
     case linkHidden = 18, linkText = 19, linkURL = 20
     case hrule = 21
     case codeKeyword = 22, codeString = 23, codeNumber = 24, codeComment = 25
+    case tableHeader = 26, tableRow = 27, tableDelimiter = 28, tablePipe = 29
 }
 
 struct Span {
@@ -32,6 +33,14 @@ extension NSAttributedString.Key {
     static let glaukQuote = NSAttributedString.Key("glauk.quote")
     /// 区切り線を描く範囲の目印
     static let glaukRule = NSAttributedString.Key("glauk.rule")
+    /// コードブロックの角丸背景を描く範囲
+    static let glaukCodeBlock = NSAttributedString.Key("glauk.codeBlock")
+    /// インラインコードの角丸背景を描く範囲
+    static let glaukInlineCode = NSAttributedString.Key("glauk.inlineCode")
+    /// テーブル全体の枠を描く範囲
+    static let glaukTable = NSAttributedString.Key("glauk.table")
+    /// テーブルの見出し行(下に区切り線を描く)
+    static let glaukTableHeader = NSAttributedString.Key("glauk.tableHeader")
 }
 
 enum MarkdownParser {

@@ -71,6 +71,21 @@ struct EditorTypography {
         p.headIndent = 20
         return p
     }()
+    /// コードブロック / テーブルは角丸の内側に余白を作り、行間も詰める
+    var codeParagraph: NSParagraphStyle = {
+        let p = NSMutableParagraphStyle()
+        p.lineHeightMultiple = 1.25
+        p.firstLineHeadIndent = 12
+        p.headIndent = 12
+        p.tailIndent = -12
+        return p
+    }()
+
+    /// コードブロックの角丸の丸み
+    var codeCornerRadius: CGFloat = 6
+    var inlineCodeCornerRadius: CGFloat = 3
+    /// テーブルの罫線
+    var tableRule = NSColor.separatorColor
     /// glauk-design-doc.md の CodeBg(Light #EFEDE8 / Dark #26262A)
     var codeBg = NSColor(name: nil) { appearance in
         let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
@@ -118,6 +133,10 @@ final class SyntaxHighlighter {
 
         storage.removeAttribute(.glaukQuote, range: scope)
         storage.removeAttribute(.glaukRule, range: scope)
+        storage.removeAttribute(.glaukCodeBlock, range: scope)
+        storage.removeAttribute(.glaukInlineCode, range: scope)
+        storage.removeAttribute(.glaukTable, range: scope)
+        storage.removeAttribute(.glaukTableHeader, range: scope)
         storage.removeAttribute(.glaukLinkURL, range: scope)
         storage.removeAttribute(.obliqueness, range: scope)
         storage.removeAttribute(.strikethroughStyle, range: scope)
@@ -148,7 +167,11 @@ final class SyntaxHighlighter {
                     let contentStart = NSMaxRange(open.range)
                     let contentRange = NSRange(location: contentStart, length: span.range.location - contentStart)
                     if contentRange.length > 0, NSMaxRange(contentRange) <= storage.length {
-                        storage.addAttribute(.font, value: typography.bold(typography.body), range: contentRange)
+                        // ★ 本文固定ではなく「そこに今入っているフォント」を太らせる。
+                        //   テーブルのセルはコード用の14ptなので、本文15ptで太らせると行内で大きさがずれる。
+                        let base = (storage.attribute(.font, at: contentRange.location,
+                                                      effectiveRange: nil) as? NSFont) ?? typography.body
+                        storage.addAttribute(.font, value: typography.bold(base), range: contentRange)
                     }
                     pendingBoldOpen = nil
                 } else {
@@ -241,16 +264,50 @@ final class SyntaxHighlighter {
 
             case .codeFence:
                 // ``` の行は丸ごと隠す。カーソルを置いたときだけ見える。
+                // 行そのものは残るので、それが角丸ブロックの上下の余白になる。
+                let lineRange = (storage.string as NSString).lineRange(for: span.range)
+                storage.addAttribute(.glaukCodeBlock, value: true, range: lineRange)
+                storage.addAttribute(.paragraphStyle, value: typography.codeParagraph, range: lineRange)
                 if !onCursorLine { storage.addAttribute(.glaukHidden, value: true, range: span.range) }
 
-            case .codeBlock, .inlineCode:
+            case .codeBlock:
+                let lineRange = (storage.string as NSString).lineRange(for: span.range)
                 storage.addAttribute(.font, value: typography.code, range: span.range)
-                storage.addAttribute(.backgroundColor, value: typography.codeBg, range: span.range)
+                storage.addAttribute(.glaukCodeBlock, value: true, range: lineRange)
+                storage.addAttribute(.paragraphStyle, value: typography.codeParagraph, range: lineRange)
+
+            case .inlineCode:
+                storage.addAttribute(.font, value: typography.code, range: span.range)
+                storage.addAttribute(.glaukInlineCode, value: true, range: span.range)
 
             case .inlineCodeMarker:
-                // 隠していても背景は繋げたいので、先に背景を塗ってから隠す
-                storage.addAttribute(.backgroundColor, value: typography.codeBg, range: span.range)
+                // 背景は繋げたいので、隠す範囲も含めて目印を付ける
+                storage.addAttribute(.glaukInlineCode, value: true, range: span.range)
                 if !onCursorLine { storage.addAttribute(.glaukHidden, value: true, range: span.range) }
+
+            case .tableHeader, .tableRow:
+                // ★ 改行まで含めた行範囲に目印を付ける。そうしないと行と行の間で属性が切れ、
+                //   テーブル全体ではなく行ごとに枠が描かれてしまう。
+                let lineRange = (storage.string as NSString).lineRange(for: span.range)
+                storage.addAttribute(.glaukTable, value: true, range: lineRange)
+                storage.addAttribute(.font, value: typography.code, range: span.range)
+                storage.addAttribute(.paragraphStyle, value: typography.codeParagraph, range: lineRange)
+                if span.kind == .tableHeader {
+                    storage.addAttribute(.font, value: typography.bold(typography.code), range: span.range)
+                    storage.addAttribute(.glaukTableHeader, value: true, range: span.range)
+                }
+
+            case .tableDelimiter:
+                // |---|---| はたたむ。見出しの下の線は MarkdownLayoutManager が描く。
+                let lineRange = (storage.string as NSString).lineRange(for: span.range)
+                storage.addAttribute(.glaukTable, value: true, range: lineRange)
+                if !onCursorLine {
+                    storage.addAttribute(.glaukHidden, value: true, range: span.range)
+                    storage.addAttribute(.font, value: typography.folded, range: span.range)
+                }
+
+            case .tablePipe:
+                storage.addAttribute(.foregroundColor, value: typography.tableRule, range: span.range)
 
             case .wikilinkName:
                 let exists = currentTargetName.map(noteExists) ?? false

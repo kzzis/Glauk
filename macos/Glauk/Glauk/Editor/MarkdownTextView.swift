@@ -17,6 +17,14 @@ struct MarkdownTextView: NSViewRepresentable {
     // 最初に1回だけ呼ばれる。ここでAppKit側を組み立てる
     func makeNSView(context: Context) -> NSScrollView {
         let layoutManager = MarkdownLayoutManager()
+        // 文字では表せない装飾(角丸・縦棒・罫線)を描くための色をハイライタと揃える
+        let typography = EditorTypography()
+        layoutManager.codeBgColor = typography.codeBg
+        layoutManager.codeCornerRadius = typography.codeCornerRadius
+        layoutManager.inlineCodeCornerRadius = typography.inlineCodeCornerRadius
+        layoutManager.quoteBarColor = typography.quoteBar
+        layoutManager.quoteBarWidth = typography.quoteBarWidth
+        layoutManager.tableRuleColor = typography.tableRule
         let storage = NSTextStorage()
         storage.delegate = context.coordinator
         storage.addLayoutManager(layoutManager)

@@ -28,6 +28,11 @@ pub const SpanKind = enum(u8) {
     code_string = 23,
     code_number = 24,
     code_comment = 25,
+    // --- テーブル ---
+    table_header = 26, // 見出し行(1行目)
+    table_row = 27, // 本文の行
+    table_delimiter = 28, // |---|:--| の行(たたむ)
+    table_pipe = 29, // 区切りの |
 };
 
 /// Swiftに渡す構造体。UTF-16コードユニット単位。
@@ -128,6 +133,18 @@ fn scanLine(
         }
     }
 
+    try scanInline(gpa, base, line, body_start, out);
+}
+
+/// 行内の記法(コード / 太字 / 斜体 / 打ち消し / リンク)だけを見る。
+/// 行頭の記法(見出し・引用・リスト)を解釈したあとの本文部分と、テーブルのセルから呼ぶ。
+fn scanInline(
+    gpa: std.mem.Allocator,
+    base: usize,
+    line: []const u8,
+    body_start: usize,
+    out: *std.ArrayList(ByteSpan),
+) !void {
     var i: usize = body_start;
     while (i < line.len) {
         // --- インラインコード: ` ... ` ---
@@ -325,6 +342,47 @@ fn frontmatterEnd(text: []const u8) ?usize {
     return null;
 }
 
+/// `|` を含む行(テーブルの行になりうる)
+fn isTableRow(line: []const u8) bool {
+    const t = std.mem.trim(u8, line, " \t\r");
+    return t.len > 0 and std.mem.indexOfScalar(u8, t, '|') != null;
+}
+
+/// `|---|:--:|` のような区切り行
+fn isTableDelimiter(line: []const u8) bool {
+    const t = std.mem.trim(u8, line, " \t\r");
+    if (t.len == 0) return false;
+    var has_dash = false;
+    var has_pipe = false;
+    for (t) |c| {
+        switch (c) {
+            '-' => has_dash = true,
+            '|' => has_pipe = true,
+            ':', ' ', '\t' => {},
+            else => return false,
+        }
+    }
+    return has_dash and has_pipe;
+}
+
+/// テーブルの行の中身(`|` の位置と、セル内のインライン記法)を出す
+fn scanTableRow(
+    gpa: std.mem.Allocator,
+    base: usize,
+    line: []const u8,
+    kind: SpanKind,
+    out: *std.ArrayList(ByteSpan),
+) !void {
+    try out.append(gpa, .{ .start = base, .len = line.len, .kind = kind });
+    for (line, 0..) |c, idx| {
+        if (c == '|') {
+            try out.append(gpa, .{ .start = base + idx, .len = 1, .kind = .table_pipe });
+        }
+    }
+    // セルの中でも太字やインラインコードは効かせる
+    try scanInline(gpa, base, line, 0, out);
+}
+
 fn scanAll(gpa: std.mem.Allocator, text: []const u8, out: *std.ArrayList(ByteSpan)) !void {
     var line_start: usize = 0;
     var in_fence = false;
@@ -332,6 +390,9 @@ fn scanAll(gpa: std.mem.Allocator, text: []const u8, out: *std.ArrayList(ByteSpa
     var in_block_comment = false;
     var tokens: std.ArrayList(syntax.Token) = .empty;
     defer tokens.deinit(gpa);
+    // テーブルは複数行にまたがるので、どこまでが1つのテーブルかを覚えておく
+    var table_end: usize = 0;
+    var table_header_start: usize = std.math.maxInt(usize);
 
     // --- フロントマター: 先頭の --- ... --- をひとまとまりで扱う ---
     if (frontmatterEnd(text)) |end| {
@@ -373,8 +434,38 @@ fn scanAll(gpa: std.mem.Allocator, text: []const u8, out: *std.ArrayList(ByteSpa
                     },
                 });
             }
+        } else if (line_start < table_end) {
+            // テーブルの中。区切り行はたたみ、それ以外は見出し行/本文行として扱う。
+            if (isTableDelimiter(line)) {
+                try out.append(gpa, .{ .start = line_start, .len = line.len, .kind = .table_delimiter });
+            } else {
+                const kind: SpanKind = if (line_start == table_header_start) .table_header else .table_row;
+                try scanTableRow(gpa, line_start, line, kind, out);
+            }
         } else {
-            try scanLine(gpa, line_start, line, out);
+            // テーブルの始まりか?(次の行が |---| ならテーブル)
+            var handled = false;
+            if (isTableRow(line) and line_end < text.len) {
+                const next_start = line_end + 1;
+                const next_end = std.mem.indexOfScalarPos(u8, text, next_start, '\n') orelse text.len;
+                if (isTableDelimiter(text[next_start..next_end])) {
+                    // `|` を含む行が続くところまでがテーブル
+                    var p = if (next_end == text.len) text.len else next_end + 1;
+                    var end = next_end;
+                    while (p < text.len) {
+                        const e = std.mem.indexOfScalarPos(u8, text, p, '\n') orelse text.len;
+                        if (!isTableRow(text[p..e])) break;
+                        end = e;
+                        if (e == text.len) break;
+                        p = e + 1;
+                    }
+                    table_header_start = line_start;
+                    table_end = end;
+                    try scanTableRow(gpa, line_start, line, .table_header, out);
+                    handled = true;
+                }
+            }
+            if (!handled) try scanLine(gpa, line_start, line, out);
         }
 
         if (line_end == text.len) break;
@@ -719,6 +810,52 @@ test "the fence language decides the keywords" {
     const s = try parse(gpa, "```swift\nfn main() void {}\n```\n");
     defer gpa.free(s);
     try testing.expectEqual(@as(usize, 0), kindsOf(s, .code_keyword));
+}
+
+test "a table needs a delimiter row on the second line" {
+    const gpa = testing.allocator;
+    const spans = try parse(gpa, "| a | b |\n|---|---|\n| 1 | 2 |\n");
+    defer gpa.free(spans);
+
+    try testing.expectEqual(@as(usize, 1), kindsOf(spans, .table_header));
+    try testing.expectEqual(@as(usize, 1), kindsOf(spans, .table_delimiter));
+    try testing.expectEqual(@as(usize, 1), kindsOf(spans, .table_row));
+    // 見出し行と本文行の3本ずつ。区切り行はたたむのでパイプは出さない
+    try testing.expectEqual(@as(usize, 6), kindsOf(spans, .table_pipe));
+}
+
+test "pipes without a delimiter row are not a table" {
+    const gpa = testing.allocator;
+    const spans = try parse(gpa, "a | b\nc | d\n");
+    defer gpa.free(spans);
+    try testing.expectEqual(@as(usize, 0), kindsOf(spans, .table_header));
+    try testing.expectEqual(@as(usize, 0), kindsOf(spans, .table_pipe));
+}
+
+test "the table ends at the first line without a pipe" {
+    const gpa = testing.allocator;
+    const spans = try parse(gpa, "| a |\n|---|\n| 1 |\n\n# 見出し\n");
+    defer gpa.free(spans);
+
+    try testing.expectEqual(@as(usize, 1), kindsOf(spans, .table_row));
+    // テーブルの外の見出しは通常どおり解析される
+    try testing.expectEqual(@as(usize, 1), kindsOf(spans, .heading1));
+}
+
+test "inline markup still works inside table cells" {
+    const gpa = testing.allocator;
+    const spans = try parse(gpa, "| **x** | `y` |\n|---|---|\n");
+    defer gpa.free(spans);
+
+    try testing.expectEqual(@as(usize, 2), kindsOf(spans, .bold_marker));
+    try testing.expectEqual(@as(usize, 2), kindsOf(spans, .inline_code_marker));
+}
+
+test "a table inside a code fence is not parsed as a table" {
+    const gpa = testing.allocator;
+    const spans = try parse(gpa, "```\n| a |\n|---|\n```\n");
+    defer gpa.free(spans);
+    try testing.expectEqual(@as(usize, 0), kindsOf(spans, .table_header));
 }
 
 test "alias form hides the target and shows the alias" {
