@@ -43,6 +43,13 @@ struct MarkdownTextView: NSViewRepresentable {
         textView.isHorizontallyResizable = false
         textView.autoresizingMask = NSView.AutoresizingMask.width
         textView.textContainerInset = NSSize(width: 32, height: 32)
+        // ★ これが無いと maxSize は生成時のフレーム高さのまま = 表示領域の高さで頭打ちになり、
+        //   本文がそれより長くてもテキストビューが伸びない(実測: 本文2545ptに対しフレーム660pt)。
+        //   さらに scrollCurrentLineToCenter の maxY が 0 になるため、
+        //   スクロールしても常に先頭へ戻され「全体が見れない」状態になる。
+        textView.minSize = NSSize(width: 0, height: 0)
+        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude,
+                                  height: CGFloat.greatestFiniteMagnitude)
 
         textView.font = NSFont(name: "IBMPlexMono", size: 15)
             ?? NSFont.monospacedSystemFont(ofSize: 15, weight: .regular)
