@@ -4,6 +4,7 @@ import AppKit
 
 struct MarkdownTextView: NSViewRepresentable {
     @Binding var text: String
+    var noteIndex: NoteIndex
     var typewriterScroll: Bool = true
 
     func makeCoordinator() -> Coordinator {
@@ -22,8 +23,9 @@ struct MarkdownTextView: NSViewRepresentable {
         container.widthTracksTextView = true
         layoutManager.addTextContainer(container)
 
-        let textView = NSTextView(frame: .zero, textContainer: container)
+        let textView = EditorTextView(frame: .zero, textContainer: container)
         textView.delegate = context.coordinator
+        textView.linkDelegate = context.coordinator
 
         // --- 書き心地に効く設定 ---
         textView.isRichText = false                          // 貼り付けで書式を持ち込ませない
@@ -90,7 +92,7 @@ struct MarkdownTextView: NSViewRepresentable {
         }
     }
 
-    final class Coordinator: NSObject, NSTextViewDelegate, NSTextStorageDelegate {
+    final class Coordinator: NSObject, NSTextViewDelegate, NSTextStorageDelegate, EditorTextViewDelegate {
         private let parent: MarkdownTextView
         let highlighter = SyntaxHighlighter()
         weak var textView: NSTextView?
@@ -101,6 +103,11 @@ struct MarkdownTextView: NSViewRepresentable {
 
         init(_ parent: MarkdownTextView) {
             self.parent = parent
+            super.init()
+            highlighter.noteExists = { [weak noteIndex = parent.noteIndex] name in
+                // NSTextStorageDelegate/NSTextViewDelegate の呼び出しは常にメインスレッドなので安全
+                MainActor.assumeIsolated { noteIndex?.exists(name) ?? false }
+            }
         }
 
         /// `**` を打ち終えた時点で閉じの `**` を補い、カーソルを内側に置く
@@ -227,6 +234,19 @@ struct MarkdownTextView: NSViewRepresentable {
             }
             highlighter.applySpans(to: storage, in: cursorLine, cursorLine: cursorLine)
             lastCursorLine = cursorLine
+        }
+
+        /// リンクをクリックしたときに呼ばれる。実際にノートを開く処理は Step 5b で差し替える
+        func editorTextView(_ tv: NSTextView, didClickWikilink name: String) {
+            // mouseDown からの呼び出しなので常にメインスレッド
+            MainActor.assumeIsolated {
+                if parent.noteIndex.exists(name) {
+                    print("[link] open: \(name) → \(parent.noteIndex.path(for: name) ?? "?")")
+                } else {
+                    print("[link] not found: \(name)")
+                    NSSound.beep()
+                }
+            }
         }
 
         private func scrollCurrentLineToCenter(_ textView: NSTextView) {
