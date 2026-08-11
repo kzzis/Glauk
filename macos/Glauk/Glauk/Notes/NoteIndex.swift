@@ -1,4 +1,5 @@
 // NoteIndex.swift
+import Combine
 import Foundation
 
 @MainActor
