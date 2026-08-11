@@ -5,11 +5,15 @@ const watch = @import("watch.zig");
 const MAX_FILE_BYTES = 32 * 1024 * 1024; // 32MB を上限にしておく
 
 export fn glauk_read_file(path: [*:0]const u8, out_len: *usize) callconv(.c) ?[*]u8 {
+    const p = std.mem.span(path);
     const data = std.fs.cwd().readFileAlloc(
         ffi.allocator,
-        std.mem.span(path),
+        p,
         MAX_FILE_BYTES,
-    ) catch return null;
+    ) catch |err| {
+        std.debug.print("[glauk] read failed for \"{s}\": {s}\n", .{ p, @errorName(err) });
+        return null;
+    };
     out_len.* = data.len;
     return data.ptr;
 }
