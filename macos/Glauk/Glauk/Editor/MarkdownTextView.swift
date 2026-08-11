@@ -95,6 +95,7 @@ struct MarkdownTextView: NSViewRepresentable {
     final class Coordinator: NSObject, NSTextViewDelegate, NSTextStorageDelegate, EditorTextViewDelegate {
         private let parent: MarkdownTextView
         let highlighter = SyntaxHighlighter()
+        private lazy var completion = WikilinkCompletion(index: parent.noteIndex)
         weak var textView: NSTextView?
         var textStorage: NSTextStorage?   // NSTextView/NSTextContainerはlayoutManagerを弱参照するため、これが無いと解放されて編集不能になる
         private var lastCursorLine: NSRange?
@@ -179,6 +180,35 @@ struct MarkdownTextView: NSViewRepresentable {
             let ms = (CFAbsoluteTimeGetCurrent() - t0) * 1000
             if ms > 8 { print("[latency] textDidChange \(String(format: "%.2f", ms))ms") }
             #endif
+
+            // ★ 変換中(下線が出ている状態)に complete(nil) を呼ぶと、変換候補ウィンドウと
+            //   補完ポップアップがぶつかって入力が壊れる。日本語環境ではほぼ必須のガード。
+            guard !textView.hasMarkedText() else { return }
+            let ns = textView.string as NSString
+            let cursor = textView.selectedRange().location
+            if completion.openBracketRange(in: ns, cursor: cursor) != nil {
+                textView.complete(nil)
+            }
+        }
+
+        func textView(
+            _ textView: NSTextView,
+            completions words: [String],
+            forPartialWordRange charRange: NSRange,
+            indexOfSelectedItem index: UnsafeMutablePointer<Int>?
+        ) -> [String] {
+            let ns = textView.string as NSString
+            guard completion.openBracketRange(in: ns, cursor: NSMaxRange(charRange)) != nil else {
+                return []      // wikilink 文脈でなければ標準の英単語補完を出さない
+            }
+            let query = ns.substring(with: charRange)
+            // NSTextViewDelegate の呼び出しは常にメインスレッド
+            return MainActor.assumeIsolated { completion.completions(for: query) }
+        }
+
+        func textView(_ textView: NSTextView, rangeForUserCompletion range: NSRange) -> NSRange {
+            let ns = textView.string as NSString
+            return completion.openBracketRange(in: ns, cursor: NSMaxRange(range)) ?? range
         }
 
         // NSTextStorage が編集を確定させた直後に呼ばれる。
