@@ -17,22 +17,21 @@ export fn glauk_read_file(path: [*:0]const u8, out_len: *usize) callconv(.c) ?[*
 export fn glauk_write_file(path: [*:0]const u8, data: [*]const u8, len: usize) callconv(.c) bool {
     const p = std.mem.span(path);
 
+    // App Sandbox は NSSavePanel/NSOpenPanel で選ばれた「そのファイル名」にしか書き込み
+    // 権限を与えない。atomicFile は同じディレクトリに別名の一時ファイルを作るため、
+    // Documents や iCloud Drive のような場所では PermissionDenied になる。
+    // 安全性(atomic rename)より「確実に保存できること」を優先し、直接上書きに
+    // フォールバックする。これは正常系なので黙って切り替える(沈黙する自動保存)。
     if (writeAtomic(p, data[0..len])) {
         watch.glauk_mark_self_write();
         return true;
-    } else |err| {
-        // App Sandbox は NSSavePanel/NSOpenPanel で選ばれた「そのファイル名」にしか
-        // 書き込み権限を与えない。atomicFile は同じディレクトリに別名の一時ファイルを
-        // 作るため、Downloads や iCloud Drive のような場所では PermissionDenied になる。
-        // その場合は安全性より「保存できること」を優先し、直接上書きにフォールバックする。
-        std.debug.print("[glauk] atomic write failed for \"{s}\": {s}; falling back to direct write\n", .{ p, @errorName(err) });
-    }
+    } else |_| {}
 
     if (writeDirect(p, data[0..len])) {
         watch.glauk_mark_self_write();
         return true;
     } else |err| {
-        std.debug.print("[glauk] direct write failed for \"{s}\": {s}\n", .{ p, @errorName(err) });
+        std.debug.print("[glauk] write failed for \"{s}\": {s}\n", .{ p, @errorName(err) });
         return false;
     }
 }
