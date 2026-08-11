@@ -74,20 +74,37 @@ final class MarkdownLayoutManager: NSLayoutManager {
                          yRadius: inlineCodeCornerRadius).fill()
         }
 
-        // --- テーブル: 枠と、見出しの下の線 ---
-        for (_, rect) in blockRects(for: .glaukTable, in: charRange, origin: origin) {
+        // --- テーブル: 外枠 + 行の区切り(縦罫線は下の glaukTablePipe で描く) ---
+        for (range, rect) in blockRects(for: .glaukTable, in: charRange, origin: origin) {
             let box = NSRect(x: origin.x + container.lineFragmentPadding, y: rect.minY,
                              width: fullWidth, height: rect.height)
             let path = NSBezierPath(roundedRect: box, xRadius: 4, yRadius: 4)
             tableRuleColor.setStroke()
             path.lineWidth = 1
             path.stroke()
-        }
-        for (_, rect) in blockRects(for: .glaukTableHeader, in: charRange, origin: origin) {
-            let line = NSRect(x: origin.x + container.lineFragmentPadding, y: rect.maxY - 1,
-                              width: fullWidth, height: 1)
+
+            // 行と行の間に横罫線。たたんだ区切り行は高さが無いので飛ばす。
+            let glyphs = glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+            var fragments: [NSRect] = []
+            enumerateLineFragments(forGlyphRange: glyphs) { r, _, _, _, _ in
+                if r.height > 1 { fragments.append(r) }
+            }
             tableRuleColor.setFill()
-            line.fill()
+            for fragment in fragments.dropLast() {
+                NSRect(x: box.minX, y: origin.y + fragment.maxY, width: fullWidth, height: 1).fill()
+            }
+        }
+
+        // --- テーブルの縦罫線: 透明にした `|` の位置に引く ---
+        storage.enumerateAttribute(.glaukTablePipe, in: charRange) { value, range, _ in
+            guard value != nil else { return }
+            let glyphs = glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+            let rect = boundingRect(forGlyphRange: glyphs, in: container)
+            guard rect.width > 0 else { return }
+            let x = (origin.x + rect.midX).rounded()
+            let bar = NSRect(x: x, y: origin.y + rect.minY, width: 1, height: rect.height)
+            self.tableRuleColor.setFill()
+            bar.fill()
         }
 
         storage.enumerateAttribute(.glaukQuote, in: charRange) { value, range, _ in

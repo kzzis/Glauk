@@ -155,6 +155,15 @@ final class SyntaxHighlighter {
         storage.removeAttribute(.kern, range: scope)   // テーブルの桁揃えをやり直すため
         storage.addAttribute(.paragraphStyle, value: typography.bodyParagraph, range: scope)
 
+        // ★ Obsidian と同じ考え方: カーソルがテーブルの中にある間は原文のまま見せ、
+        //   外に出たら罫線の表に切り替える。行単位で切り替えると、カーソル行だけ
+        //   `|` が見えて桁がずれるため、テーブル全体で判定する。
+        let cursorTable = cursorLine.flatMap { tableRange(in: ns, touching: $0) }
+        func isSourceMode(_ range: NSRange) -> Bool {
+            guard let t = cursorTable else { return false }
+            return NSIntersectionRange(t, range).length > 0
+        }
+
         // marker は開き・閉じの2個1組で来る(Zig側が閉じが見つかったときだけ両方を返すため)
         var pendingBoldOpen: Span?
         var pendingItalicOpen: Span?
@@ -320,10 +329,10 @@ final class SyntaxHighlighter {
                 }
 
             case .tableDelimiter:
-                // |---|---| はたたむ。見出しの下の線は MarkdownLayoutManager が描く。
+                // |---|---| はたたむ。罫線は MarkdownLayoutManager が描く。
                 let lineRange = (storage.string as NSString).lineRange(for: span.range)
                 storage.addAttribute(.glaukTable, value: true, range: lineRange)
-                if !onCursorLine {
+                if !isSourceMode(span.range) {
                     // ★ 極小フォントは改行まで含めて掛ける。行の中身だけだと、
                     //   末尾の改行が本文サイズのまま残って1行分の隙間になる。
                     storage.addAttribute(.glaukHidden, value: true, range: lineRange)
@@ -331,7 +340,14 @@ final class SyntaxHighlighter {
                 }
 
             case .tablePipe:
-                storage.addAttribute(.foregroundColor, value: typography.tableRule, range: span.range)
+                if isSourceMode(span.range) {
+                    storage.addAttribute(.foregroundColor, value: typography.tableRule, range: span.range)
+                } else {
+                    // ★ 隠すのではなく透明にする。隠すと文字送りが0になって桁が詰まるので、
+                    //   `|` の幅はそのまま列の余白として使い、その位置に縦罫線を描く。
+                    storage.addAttribute(.foregroundColor, value: NSColor.clear, range: span.range)
+                    storage.addAttribute(.glaukTablePipe, value: true, range: span.range)
+                }
 
             case .wikilinkName:
                 let exists = currentTargetName.map(noteExists) ?? false
@@ -346,7 +362,7 @@ final class SyntaxHighlighter {
                 }
             }
         }
-        alignTables(in: storage, scope: scope)
+        alignTables(in: storage, scope: scope, skipping: cursorTable)
         storage.endEditing()
     }
 
@@ -355,11 +371,14 @@ final class SyntaxHighlighter {
     /// 原文のセル幅はばらばらなので、そのまま出すと `|` の位置が揃わない。
     /// テキストは書き換えられないので、各セルの最後の文字に kern(字送り)を足して
     /// 列の幅を揃える。kern はその文字の「後ろ」に空きを作るので、次の `|` が右へ動く。
-    private func alignTables(in storage: NSTextStorage, scope: NSRange) {
+    private func alignTables(in storage: NSTextStorage, scope: NSRange, skipping cursorTable: NSRange?) {
         let ns = storage.string as NSString
         var tables: [NSRange] = []
         storage.enumerateAttribute(.glaukTable, in: scope) { value, range, _ in
-            if value != nil, range.length > 0 { tables.append(range) }
+            guard value != nil, range.length > 0 else { return }
+            // 編集中のテーブルは原文のまま見せるので揃えない
+            if let c = cursorTable, NSIntersectionRange(c, range).length > 0 { return }
+            tables.append(range)
         }
         guard !tables.isEmpty else { return }
 

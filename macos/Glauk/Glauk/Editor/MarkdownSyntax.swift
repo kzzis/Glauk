@@ -44,6 +44,8 @@ extension NSAttributedString.Key {
     static let glaukTableHeader = NSAttributedString.Key("glauk.tableHeader")
     /// コードブロックの言語名(ブロックの右上に描く)
     static let glaukCodeLang = NSAttributedString.Key("glauk.codeLang")
+    /// テーブルの縦罫線を描く位置(`|` の文字に付ける)
+    static let glaukTablePipe = NSAttributedString.Key("glauk.tablePipe")
 }
 
 enum MarkdownParser {
