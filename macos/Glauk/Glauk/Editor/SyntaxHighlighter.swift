@@ -24,6 +24,17 @@ struct EditorTypography {
     var accent = NSColor.systemRed      // Step 9 でテーマトークンに差し替え
     var muted = NSColor.secondaryLabelColor
     var ink = NSColor.textColor
+    /// コードは本文より少し小さい等幅。本文が既に等幅なのでフォント自体は同系だが、
+    /// Step 9 で本文がサンセリフになったときにここだけ等幅で残るように分けておく。
+    var code = NSFont(name: "IBMPlexMono", size: 14)
+        ?? NSFont.monospacedSystemFont(ofSize: 14, weight: .regular)
+    /// glauk-design-doc.md の CodeBg(Light #EFEDE8 / Dark #26262A)
+    var codeBg = NSColor(name: nil) { appearance in
+        let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        return isDark
+            ? NSColor(srgbRed: 0x26 / 255, green: 0x26 / 255, blue: 0x2A / 255, alpha: 1)
+            : NSColor(srgbRed: 0xEF / 255, green: 0xED / 255, blue: 0xE8 / 255, alpha: 1)
+    }
 }
 
 final class SyntaxHighlighter {
@@ -50,6 +61,9 @@ final class SyntaxHighlighter {
 
         storage.beginEditing()
         storage.removeAttribute(.glaukHidden, range: scope)
+        // 前回の結果を消しておかないと、記法を消したあとも背景や下線が残る
+        storage.removeAttribute(.backgroundColor, range: scope)
+        storage.removeAttribute(.underlineStyle, range: scope)
         storage.addAttribute(.font, value: typography.body, range: scope)
         storage.addAttribute(.foregroundColor, value: typography.ink, range: scope)
 
@@ -92,6 +106,19 @@ final class SyntaxHighlighter {
                 currentTargetName = name
                 storage.addAttribute(.glaukLinkTarget, value: name, range: span.range)
 
+            case .codeFence:
+                // ``` の行は丸ごと隠す。カーソルを置いたときだけ見える。
+                if !onCursorLine { storage.addAttribute(.glaukHidden, value: true, range: span.range) }
+
+            case .codeBlock, .inlineCode:
+                storage.addAttribute(.font, value: typography.code, range: span.range)
+                storage.addAttribute(.backgroundColor, value: typography.codeBg, range: span.range)
+
+            case .inlineCodeMarker:
+                // 隠していても背景は繋げたいので、先に背景を塗ってから隠す
+                storage.addAttribute(.backgroundColor, value: typography.codeBg, range: span.range)
+                if !onCursorLine { storage.addAttribute(.glaukHidden, value: true, range: span.range) }
+
             case .wikilinkName:
                 let exists = currentTargetName.map(noteExists) ?? false
                 if exists {
@@ -118,7 +145,41 @@ final class SyntaxHighlighter {
             scope = ns.paragraphRange(for: NSRange(location: scope.location - 1, length: 1))
                 .union(scope)
         }
+        // ★ コードブロックの途中で切ると、開きの ``` が見えないまま解析することになり、
+        //   コードの中身が通常のMarkdownとして解釈されてしまう。ブロック全体まで広げる。
+        scope = expandToFenceBoundaries(in: ns, scope: scope)
         applySpans(to: storage, in: scope, cursorLine: cursorLine)
+    }
+
+    /// ``` で囲まれたブロックに掛かっているなら、そのブロック全体を含むよう広げる
+    private func expandToFenceBoundaries(in ns: NSString, scope: NSRange) -> NSRange {
+        var fenceLines: [NSRange] = []
+        var searchStart = 0
+        while searchStart < ns.length {
+            let found = ns.range(of: "```",
+                                 range: NSRange(location: searchStart, length: ns.length - searchStart))
+            guard found.location != NSNotFound else { break }
+            let line = ns.lineRange(for: NSRange(location: found.location, length: 0))
+            // 行頭(先頭の空白を除く)から始まるものだけをフェンスとみなす
+            let indent = ns.substring(with: NSRange(location: line.location,
+                                                    length: found.location - line.location))
+            if indent.trimmingCharacters(in: .whitespaces).isEmpty { fenceLines.append(line) }
+            searchStart = NSMaxRange(found)
+        }
+
+        var result = scope
+        var i = 0
+        while i < fenceLines.count {
+            let open = fenceLines[i]
+            // 閉じが無いフェンスは文末までをブロックとみなす(パーサ側の挙動と揃える)
+            let closeEnd = i + 1 < fenceLines.count ? NSMaxRange(fenceLines[i + 1]) : ns.length
+            let block = NSRange(location: open.location, length: closeEnd - open.location)
+            let touches = NSIntersectionRange(block, scope).length > 0
+                || (scope.location >= block.location && scope.location <= NSMaxRange(block))
+            if touches { result = result.union(block) }
+            i += 2
+        }
+        return result.clamped(to: ns.length)
     }
 }
 

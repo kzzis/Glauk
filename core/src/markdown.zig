@@ -8,6 +8,10 @@ pub const SpanKind = enum(u8) {
     wikilink_hidden = 5, // [[ ]] や alias記法の「隠す」部分
     wikilink_name = 6, // 画面に見せる部分(色付け・クリック対象)
     wikilink_target = 7, // Obsidianに渡す実体名の範囲
+    code_fence = 8, // ``` の行そのもの(隠す)
+    code_block = 9, // フェンスに挟まれた中身の行
+    inline_code_marker = 10, // ` の1文字(隠す)
+    inline_code = 11, // ` ` に挟まれた中身
 };
 
 /// Swiftに渡す構造体。UTF-16コードユニット単位。
@@ -59,6 +63,27 @@ fn scanLine(
 
     var i: usize = body_start;
     while (i < line.len) {
+        // --- インラインコード: ` ... ` ---
+        // ★ 太字・wikilinkより先に見る。`**not bold**` のようにコードの中身は
+        //   Markdownとして解釈してはいけないため。
+        if (line[i] == '`') {
+            if (std.mem.indexOfScalarPos(u8, line, i + 1, '`')) |close| {
+                try out.append(gpa, .{ .start = base + i, .len = 1, .kind = .inline_code_marker });
+                try out.append(gpa, .{ .start = base + close, .len = 1, .kind = .inline_code_marker });
+                if (close > i + 1) {
+                    try out.append(gpa, .{
+                        .start = base + i + 1,
+                        .len = close - i - 1,
+                        .kind = .inline_code,
+                    });
+                }
+                i = close + 1;
+                continue;
+            }
+            i += 1; // 閉じが無い → マーカー扱いしない
+            continue;
+        }
+
         // --- 太字: ** ... ** ---
         if (i + 1 < line.len and line[i] == '*' and line[i + 1] == '*') {
             if (std.mem.indexOfPos(u8, line, i + 2, "**")) |close| {
@@ -124,11 +149,34 @@ fn scanLine(
     }
 }
 
+/// 行頭(先頭の空白を除く)が ``` で始まるならフェンス行
+fn fenceIndent(line: []const u8) ?usize {
+    var n: usize = 0;
+    while (n < line.len and (line[n] == ' ' or line[n] == '\t')) n += 1;
+    if (line.len - n >= 3 and std.mem.startsWith(u8, line[n..], "```")) return n;
+    return null;
+}
+
 fn scanAll(gpa: std.mem.Allocator, text: []const u8, out: *std.ArrayList(ByteSpan)) !void {
     var line_start: usize = 0;
+    var in_fence = false;
     while (true) {
         const line_end = std.mem.indexOfScalarPos(u8, text, line_start, '\n') orelse text.len;
-        try scanLine(gpa, line_start, text[line_start..line_end], out);
+        const line = text[line_start..line_end];
+
+        if (fenceIndent(line) != null) {
+            // ``` の行は行ごと隠す。開き/閉じの両方が同じ扱い。
+            try out.append(gpa, .{ .start = line_start, .len = line.len, .kind = .code_fence });
+            in_fence = !in_fence;
+        } else if (in_fence) {
+            // ★ コードブロックの中身は Markdown として解釈しない(scanLineを呼ばない)
+            if (line.len > 0) {
+                try out.append(gpa, .{ .start = line_start, .len = line.len, .kind = .code_block });
+            }
+        } else {
+            try scanLine(gpa, line_start, line, out);
+        }
+
         if (line_end == text.len) break;
         line_start = line_end + 1;
     }
@@ -234,6 +282,72 @@ test "emoji outside the BMP counts as two UTF-16 units" {
     const spans = try parse(gpa, "🐙**x**"); // 🐙 は4バイト / UTF-16では2
     defer gpa.free(spans);
     try testing.expectEqual(@as(u32, 2), spans[0].start);
+}
+
+test "inline code marks the backticks and the content between them" {
+    const gpa = testing.allocator;
+    const spans = try parse(gpa, "see `code` here");
+    defer gpa.free(spans);
+
+    try testing.expectEqual(@as(usize, 3), spans.len);
+    try testing.expectEqual(@intFromEnum(SpanKind.inline_code_marker), spans[0].kind);
+    try testing.expectEqual(@as(u32, 4), spans[0].start);
+    try testing.expectEqual(@intFromEnum(SpanKind.inline_code), spans[1].kind);
+    try testing.expectEqual(@as(u32, 5), spans[1].start);
+    try testing.expectEqual(@as(u32, 4), spans[1].len); // "code"
+    try testing.expectEqual(@intFromEnum(SpanKind.inline_code_marker), spans[2].kind);
+    try testing.expectEqual(@as(u32, 9), spans[2].start);
+}
+
+test "markdown inside inline code is not parsed" {
+    const gpa = testing.allocator;
+    const spans = try parse(gpa, "`**not bold**`");
+    defer gpa.free(spans);
+
+    for (spans) |s| {
+        try testing.expect(s.kind != @intFromEnum(SpanKind.bold_marker));
+    }
+}
+
+test "unclosed backtick is ignored" {
+    const gpa = testing.allocator;
+    const spans = try parse(gpa, "a ` b");
+    defer gpa.free(spans);
+    try testing.expectEqual(@as(usize, 0), spans.len);
+}
+
+test "fenced block hides the fences and marks the body" {
+    const gpa = testing.allocator;
+    const spans = try parse(gpa, "```swift\nlet x = 1\n```\n");
+    defer gpa.free(spans);
+
+    try testing.expectEqual(@as(usize, 3), spans.len);
+    try testing.expectEqual(@intFromEnum(SpanKind.code_fence), spans[0].kind);
+    try testing.expectEqual(@as(u32, 8), spans[0].len); // "```swift"
+    try testing.expectEqual(@intFromEnum(SpanKind.code_block), spans[1].kind);
+    try testing.expectEqual(@as(u32, 9), spans[1].len); // "let x = 1"
+    try testing.expectEqual(@intFromEnum(SpanKind.code_fence), spans[2].kind);
+}
+
+test "markdown inside a fenced block is not parsed" {
+    const gpa = testing.allocator;
+    const spans = try parse(gpa, "```\n# not a heading\n**not bold** [[not a link]]\n```\n");
+    defer gpa.free(spans);
+
+    for (spans) |s| {
+        try testing.expect(s.kind == @intFromEnum(SpanKind.code_fence) or
+            s.kind == @intFromEnum(SpanKind.code_block));
+    }
+}
+
+test "an unclosed fence keeps the rest of the document as code" {
+    const gpa = testing.allocator;
+    const spans = try parse(gpa, "```\n# still code\n");
+    defer gpa.free(spans);
+
+    try testing.expectEqual(@as(usize, 2), spans.len);
+    try testing.expectEqual(@intFromEnum(SpanKind.code_fence), spans[0].kind);
+    try testing.expectEqual(@intFromEnum(SpanKind.code_block), spans[1].kind);
 }
 
 test "alias form hides the target and shows the alias" {
