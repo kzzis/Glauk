@@ -9,6 +9,13 @@ enum SpanKind: UInt8 {
     case codeFence = 8, codeBlock = 9
     case inlineCodeMarker = 10, inlineCode = 11
     case frontmatter = 12
+    case listMarker = 13
+    case quoteMarker = 14, quoteText = 15
+    case italicMarker = 16
+    case strikeMarker = 17
+    case linkHidden = 18, linkText = 19, linkURL = 20
+    case hrule = 21
+    case codeKeyword = 22, codeString = 23, codeNumber = 24, codeComment = 25
 }
 
 struct Span {
@@ -19,6 +26,12 @@ struct Span {
 extension NSAttributedString.Key {
     static let glaukHidden = NSAttributedString.Key("glauk.hidden")
     static let glaukLinkTarget = NSAttributedString.Key("glauk.linkTarget")
+    /// 通常のリンク `[text](url)` の URL
+    static let glaukLinkURL = NSAttributedString.Key("glauk.linkURL")
+    /// 引用の縦棒を描く範囲の目印(MarkdownLayoutManagerが背景描画で使う)
+    static let glaukQuote = NSAttributedString.Key("glauk.quote")
+    /// 区切り線を描く範囲の目印
+    static let glaukRule = NSAttributedString.Key("glauk.rule")
 }
 
 enum MarkdownParser {

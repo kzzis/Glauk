@@ -2,6 +2,7 @@
 
 pub const ffi = @import("ffi.zig");
 pub const markdown = @import("markdown.zig");
+pub const syntax = @import("syntax.zig");
 pub const file = @import("file.zig");
 pub const watch = @import("watch.zig");
 

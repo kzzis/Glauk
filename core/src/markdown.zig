@@ -1,4 +1,5 @@
 const std = @import("std");
+const syntax = @import("syntax.zig");
 
 pub const SpanKind = enum(u8) {
     heading1 = 1,
@@ -13,6 +14,20 @@ pub const SpanKind = enum(u8) {
     inline_code_marker = 10, // ` の1文字(隠す)
     inline_code = 11, // ` ` に挟まれた中身
     frontmatter = 12, // 文書先頭の --- ... --- 全体(たたむ)
+    list_marker = 13, // 行頭の "- " "* " "+ " "1. "
+    quote_marker = 14, // 行頭の "> "(隠す)
+    quote_text = 15, // 引用の本文
+    italic_marker = 16, // * ... * / _ ... _
+    strike_marker = 17, // ~~ ... ~~
+    link_hidden = 18, // [ と ](url) の隠す部分
+    link_text = 19, // [ここ](url) の見せる部分
+    link_url = 20, // 開くときに使うURLの範囲
+    hrule = 21, // 文中の --- / *** / ___(区切り線)
+    // --- コードフェンス内のシンタックスハイライト ---
+    code_keyword = 22,
+    code_string = 23,
+    code_number = 24,
+    code_comment = 25,
 };
 
 /// Swiftに渡す構造体。UTF-16コードユニット単位。
@@ -40,12 +55,31 @@ fn utf16Len(bytes: []const u8) usize {
     return units;
 }
 
+fn isIdentPart(c: u8) bool {
+    return std.ascii.isAlphanumeric(c) or c == '_';
+}
+
+/// `---` `***` `___` だけの行(区切り線)
+fn isHrule(line: []const u8) bool {
+    const t = std.mem.trim(u8, line, " \t\r");
+    if (t.len < 3) return false;
+    const c = t[0];
+    if (c != '-' and c != '*' and c != '_') return false;
+    return std.mem.allEqual(u8, t, c);
+}
+
 fn scanLine(
     gpa: std.mem.Allocator,
     base: usize,
     line: []const u8,
     out: *std.ArrayList(ByteSpan),
 ) !void {
+    // --- 区切り線: 行全体で1つ。中身は解析しない ---
+    if (isHrule(line)) {
+        try out.append(gpa, .{ .start = base, .len = line.len, .kind = .hrule });
+        return;
+    }
+
     var body_start: usize = 0;
 
     // --- 見出し: 行頭の # が1〜3個 + 直後にスペース ---
@@ -60,6 +94,38 @@ fn scanLine(
         // `# ` のスペースまで含めて隠す(隠したときに字下げが残らないように)
         try out.append(gpa, .{ .start = base, .len = hashes + 1, .kind = kind });
         body_start = hashes + 1;
+    }
+
+    // --- 引用: 行頭の > ---
+    if (body_start == 0 and line.len > 0 and line[0] == '>') {
+        const after: usize = if (line.len > 1 and line[1] == ' ') 2 else 1;
+        try out.append(gpa, .{ .start = base, .len = after, .kind = .quote_marker });
+        if (line.len > after) {
+            try out.append(gpa, .{ .start = base + after, .len = line.len - after, .kind = .quote_text });
+        }
+        body_start = after;
+    }
+
+    // --- リスト: "- " "* " "+ " "1. "(字下げした入れ子も拾う) ---
+    {
+        var n = body_start;
+        while (n < line.len and (line[n] == ' ' or line[n] == '\t')) n += 1;
+        if (n < line.len) {
+            const c = line[n];
+            if ((c == '-' or c == '*' or c == '+') and n + 1 < line.len and line[n + 1] == ' ') {
+                try out.append(gpa, .{ .start = base + n, .len = 1, .kind = .list_marker });
+                body_start = n + 2;
+            } else if (std.ascii.isDigit(c)) {
+                var d = n;
+                while (d < line.len and std.ascii.isDigit(line[d])) d += 1;
+                if (d < line.len and (line[d] == '.' or line[d] == ')') and
+                    d + 1 < line.len and line[d + 1] == ' ')
+                {
+                    try out.append(gpa, .{ .start = base + n, .len = d - n + 1, .kind = .list_marker });
+                    body_start = d + 2;
+                }
+            }
+        }
     }
 
     var i: usize = body_start;
@@ -94,6 +160,48 @@ fn scanLine(
                 continue;
             }
             i += 2; // 閉じが無い → マーカー扱いしない
+            continue;
+        }
+
+        // --- 打ち消し: ~~ ... ~~ ---
+        if (i + 1 < line.len and line[i] == '~' and line[i + 1] == '~') {
+            if (std.mem.indexOfPos(u8, line, i + 2, "~~")) |close| {
+                try out.append(gpa, .{ .start = base + i, .len = 2, .kind = .strike_marker });
+                try out.append(gpa, .{ .start = base + close, .len = 2, .kind = .strike_marker });
+                i = close + 2;
+                continue;
+            }
+            i += 2;
+            continue;
+        }
+
+        // --- 斜体: * ... *(** は上で処理済みなので、ここに来るのは単独の * だけ)---
+        if (line[i] == '*') {
+            if (std.mem.indexOfScalarPos(u8, line, i + 1, '*')) |close| {
+                if (close > i + 1) {
+                    try out.append(gpa, .{ .start = base + i, .len = 1, .kind = .italic_marker });
+                    try out.append(gpa, .{ .start = base + close, .len = 1, .kind = .italic_marker });
+                    i = close + 1;
+                    continue;
+                }
+            }
+            i += 1;
+            continue;
+        }
+
+        // --- 斜体: _ ... _ ---
+        // ★ snake_case を斜体にしないため、語の途中の _ は無視する
+        if (line[i] == '_' and (i == 0 or !isIdentPart(line[i - 1]))) {
+            if (std.mem.indexOfScalarPos(u8, line, i + 1, '_')) |close| {
+                const ends_word = close + 1 >= line.len or !isIdentPart(line[close + 1]);
+                if (close > i + 1 and ends_word) {
+                    try out.append(gpa, .{ .start = base + i, .len = 1, .kind = .italic_marker });
+                    try out.append(gpa, .{ .start = base + close, .len = 1, .kind = .italic_marker });
+                    i = close + 1;
+                    continue;
+                }
+            }
+            i += 1;
             continue;
         }
 
@@ -146,6 +254,40 @@ fn scanLine(
             continue;
         }
 
+        // --- 通常のリンク: [text](url) ---
+        // ★ wikilink の `[[` は上で処理済みなので、ここに来るのは単独の `[` だけ
+        if (line[i] == '[') {
+            if (std.mem.indexOfScalarPos(u8, line, i + 1, ']')) |close| {
+                if (close + 1 < line.len and line[close + 1] == '(') {
+                    if (std.mem.indexOfScalarPos(u8, line, close + 2, ')')) |paren| {
+                        try out.append(gpa, .{ .start = base + i, .len = 1, .kind = .link_hidden });
+                        if (close > i + 1) {
+                            try out.append(gpa, .{
+                                .start = base + i + 1,
+                                .len = close - i - 1,
+                                .kind = .link_text,
+                            });
+                        }
+                        // `](url)` をまとめて隠し、URLの範囲は別途覚えておく
+                        try out.append(gpa, .{
+                            .start = base + close,
+                            .len = paren - close + 1,
+                            .kind = .link_hidden,
+                        });
+                        try out.append(gpa, .{
+                            .start = base + close + 2,
+                            .len = paren - close - 2,
+                            .kind = .link_url,
+                        });
+                        i = paren + 1;
+                        continue;
+                    }
+                }
+            }
+            i += 1;
+            continue;
+        }
+
         i += 1;
     }
 }
@@ -186,6 +328,10 @@ fn frontmatterEnd(text: []const u8) ?usize {
 fn scanAll(gpa: std.mem.Allocator, text: []const u8, out: *std.ArrayList(ByteSpan)) !void {
     var line_start: usize = 0;
     var in_fence = false;
+    var lang: syntax.Lang = .{};
+    var in_block_comment = false;
+    var tokens: std.ArrayList(syntax.Token) = .empty;
+    defer tokens.deinit(gpa);
 
     // --- フロントマター: 先頭の --- ... --- をひとまとまりで扱う ---
     if (frontmatterEnd(text)) |end| {
@@ -197,14 +343,35 @@ fn scanAll(gpa: std.mem.Allocator, text: []const u8, out: *std.ArrayList(ByteSpa
         const line_end = std.mem.indexOfScalarPos(u8, text, line_start, '\n') orelse text.len;
         const line = text[line_start..line_end];
 
-        if (fenceIndent(line) != null) {
+        if (fenceIndent(line)) |indent| {
             // ``` の行は行ごと隠す。開き/閉じの両方が同じ扱い。
             try out.append(gpa, .{ .start = line_start, .len = line.len, .kind = .code_fence });
+            if (!in_fence) {
+                // ```swift の "swift" から言語を決める
+                lang = syntax.langFromInfo(line[indent + 3 ..]);
+                in_block_comment = false;
+            }
             in_fence = !in_fence;
         } else if (in_fence) {
             // ★ コードブロックの中身は Markdown として解釈しない(scanLineを呼ばない)
             if (line.len > 0) {
                 try out.append(gpa, .{ .start = line_start, .len = line.len, .kind = .code_block });
+            }
+            // シンタックスハイライト。code_block を先に入れてあるので、
+            // 同じ位置ではブロック→トークンの順に適用される(ソートは安定)。
+            tokens.clearRetainingCapacity();
+            try syntax.tokenizeLine(gpa, line_start, line, lang, &in_block_comment, &tokens);
+            for (tokens.items) |t| {
+                try out.append(gpa, .{
+                    .start = t.start,
+                    .len = t.len,
+                    .kind = switch (t.kind) {
+                        .keyword => .code_keyword,
+                        .string => .code_string,
+                        .number => .code_number,
+                        .comment => .code_comment,
+                    },
+                });
             }
         } else {
             try scanLine(gpa, line_start, line, out);
@@ -354,12 +521,13 @@ test "fenced block hides the fences and marks the body" {
     const spans = try parse(gpa, "```swift\nlet x = 1\n```\n");
     defer gpa.free(spans);
 
-    try testing.expectEqual(@as(usize, 3), spans.len);
+    // フェンス2つ + 中身1行(+ 中身のシンタックストークン)
+    try testing.expectEqual(@as(usize, 2), kindsOf(spans, .code_fence));
+    try testing.expectEqual(@as(usize, 1), kindsOf(spans, .code_block));
     try testing.expectEqual(@intFromEnum(SpanKind.code_fence), spans[0].kind);
     try testing.expectEqual(@as(u32, 8), spans[0].len); // "```swift"
     try testing.expectEqual(@intFromEnum(SpanKind.code_block), spans[1].kind);
     try testing.expectEqual(@as(u32, 9), spans[1].len); // "let x = 1"
-    try testing.expectEqual(@intFromEnum(SpanKind.code_fence), spans[2].kind);
 }
 
 test "markdown inside a fenced block is not parsed" {
@@ -424,6 +592,133 @@ test "markdown inside frontmatter is not parsed" {
 
     try testing.expectEqual(@as(usize, 1), spans.len);
     try testing.expectEqual(@intFromEnum(SpanKind.frontmatter), spans[0].kind);
+}
+
+fn kindsOf(spans: []Span, want: SpanKind) usize {
+    var n: usize = 0;
+    for (spans) |s| {
+        if (s.kind == @intFromEnum(want)) n += 1;
+    }
+    return n;
+}
+
+test "list markers are found for bullets and numbers" {
+    const gpa = testing.allocator;
+    const spans = try parse(gpa, "- one\n2. two\n  * nested\n");
+    defer gpa.free(spans);
+
+    try testing.expectEqual(@as(usize, 3), kindsOf(spans, .list_marker));
+    try testing.expectEqual(@as(u32, 0), spans[0].start);
+    try testing.expectEqual(@as(u32, 1), spans[0].len); // "-"
+    try testing.expectEqual(@as(u32, 2), spans[1].len); // "2."
+}
+
+test "a dash without a space is not a list" {
+    const gpa = testing.allocator;
+    const spans = try parse(gpa, "-notalist\n");
+    defer gpa.free(spans);
+    try testing.expectEqual(@as(usize, 0), kindsOf(spans, .list_marker));
+}
+
+test "quote marks the marker and the text, and still parses inline markup" {
+    const gpa = testing.allocator;
+    const spans = try parse(gpa, "> **bold** here");
+    defer gpa.free(spans);
+
+    try testing.expectEqual(@as(usize, 1), kindsOf(spans, .quote_marker));
+    try testing.expectEqual(@as(usize, 1), kindsOf(spans, .quote_text));
+    try testing.expectEqual(@as(usize, 2), kindsOf(spans, .bold_marker));
+}
+
+test "italic uses single markers and ignores snake_case" {
+    const gpa = testing.allocator;
+    const a = try parse(gpa, "*yes* and _also_");
+    defer gpa.free(a);
+    try testing.expectEqual(@as(usize, 4), kindsOf(a, .italic_marker));
+
+    const b = try parse(gpa, "some_snake_case_name");
+    defer gpa.free(b);
+    try testing.expectEqual(@as(usize, 0), kindsOf(b, .italic_marker));
+}
+
+test "bold is not mistaken for two italics" {
+    const gpa = testing.allocator;
+    const spans = try parse(gpa, "**bold**");
+    defer gpa.free(spans);
+    try testing.expectEqual(@as(usize, 2), kindsOf(spans, .bold_marker));
+    try testing.expectEqual(@as(usize, 0), kindsOf(spans, .italic_marker));
+}
+
+test "strikethrough" {
+    const gpa = testing.allocator;
+    const spans = try parse(gpa, "~~gone~~");
+    defer gpa.free(spans);
+    try testing.expectEqual(@as(usize, 2), kindsOf(spans, .strike_marker));
+}
+
+test "markdown link hides the brackets and keeps the url range" {
+    const gpa = testing.allocator;
+    const spans = try parse(gpa, "see [text](https://x.dev) end");
+    defer gpa.free(spans);
+
+    var text_span: ?Span = null;
+    var url_span: ?Span = null;
+    for (spans) |s| {
+        if (s.kind == @intFromEnum(SpanKind.link_text)) text_span = s;
+        if (s.kind == @intFromEnum(SpanKind.link_url)) url_span = s;
+    }
+    try testing.expectEqual(@as(u32, 5), text_span.?.start); // "text"
+    try testing.expectEqual(@as(u32, 4), text_span.?.len);
+    try testing.expectEqual(@as(u32, 11), url_span.?.start); // "https://x.dev"
+    try testing.expectEqual(@as(u32, 13), url_span.?.len);
+    try testing.expectEqual(@as(usize, 2), kindsOf(spans, .link_hidden));
+}
+
+test "wikilink still wins over the plain link form" {
+    const gpa = testing.allocator;
+    const spans = try parse(gpa, "[[note]]");
+    defer gpa.free(spans);
+    try testing.expectEqual(@as(usize, 0), kindsOf(spans, .link_text));
+    try testing.expectEqual(@as(usize, 1), kindsOf(spans, .wikilink_name));
+}
+
+test "a rule line is one span and is not parsed further" {
+    const gpa = testing.allocator;
+    const spans = try parse(gpa, "text\n***\nmore");
+    defer gpa.free(spans);
+
+    try testing.expectEqual(@as(usize, 1), kindsOf(spans, .hrule));
+    try testing.expectEqual(@as(usize, 0), kindsOf(spans, .bold_marker));
+}
+
+test "code inside a fence gets syntax tokens" {
+    const gpa = testing.allocator;
+    const spans = try parse(gpa, "```swift\nlet x = 42 // note\n```\n");
+    defer gpa.free(spans);
+
+    try testing.expectEqual(@as(usize, 1), kindsOf(spans, .code_keyword)); // let
+    try testing.expectEqual(@as(usize, 1), kindsOf(spans, .code_number)); // 42
+    try testing.expectEqual(@as(usize, 1), kindsOf(spans, .code_comment)); // // note
+    try testing.expectEqual(@as(usize, 1), kindsOf(spans, .code_block));
+}
+
+test "code tokens are not emitted outside a fence" {
+    const gpa = testing.allocator;
+    const spans = try parse(gpa, "let x = 42\n");
+    defer gpa.free(spans);
+    try testing.expectEqual(@as(usize, 0), kindsOf(spans, .code_keyword));
+}
+
+test "the fence language decides the keywords" {
+    const gpa = testing.allocator;
+    // "fn" は zig のキーワードだが swift では違う
+    const z = try parse(gpa, "```zig\nfn main() void {}\n```\n");
+    defer gpa.free(z);
+    try testing.expect(kindsOf(z, .code_keyword) >= 2); // fn と void
+
+    const s = try parse(gpa, "```swift\nfn main() void {}\n```\n");
+    defer gpa.free(s);
+    try testing.expectEqual(@as(usize, 0), kindsOf(s, .code_keyword));
 }
 
 test "alias form hides the target and shows the alias" {

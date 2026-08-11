@@ -31,6 +31,46 @@ struct EditorTypography {
     /// 「たたむ」ためのフォント。グリフを消すだけでは行が1行分残るため(実測: 4行が1行分残った)、
     /// 極小フォントを併用して行の高さごと潰す。
     var folded = NSFont.systemFont(ofSize: 0.01)
+
+    /// 斜体は「フォントの差し替え」ではなく「傾き」で表す。
+    /// ★ 日本語には斜体を持つフォントが無いため、斜体フォントを指定しても AppKit の
+    ///   属性補正が日本語を描けるフォント(HiraKaku)へ差し替え、斜体が消える。
+    ///   実測: "latin" → …Monospaced-RegularItalic のまま / "日本語" → HiraKaku-W4(italic=false)。
+    ///   obliqueness ならフォントに関係なく効く。
+    var italicObliqueness: CGFloat = 0.2
+
+    // --- コードのシンタックスハイライト ---
+    // システムのセマンティックカラーを使い、ライト/ダークに自動で追従させる
+    var codeKeyword = NSColor.systemPurple
+    var codeString = NSColor.systemGreen
+    var codeNumber = NSColor.systemOrange
+    var codeComment = NSColor.secondaryLabelColor
+
+    /// 引用の縦棒の色と太さ
+    var quoteBar = NSColor.systemRed
+    var quoteBarWidth: CGFloat = 2
+
+    /// MarkdownTextView の defaultParagraphStyle と必ず揃えること
+    var bodyParagraph: NSParagraphStyle = {
+        let p = NSMutableParagraphStyle()
+        p.lineHeightMultiple = 1.55
+        return p
+    }()
+    /// 引用は字下げして、空いた左側に縦棒を描く
+    var quoteParagraph: NSParagraphStyle = {
+        let p = NSMutableParagraphStyle()
+        p.lineHeightMultiple = 1.55
+        p.firstLineHeadIndent = 16
+        p.headIndent = 16
+        return p
+    }()
+    /// リストは折り返した2行目以降がマーカーの右に揃うようにする
+    var listParagraph: NSParagraphStyle = {
+        let p = NSMutableParagraphStyle()
+        p.lineHeightMultiple = 1.55
+        p.headIndent = 20
+        return p
+    }()
     /// glauk-design-doc.md の CodeBg(Light #EFEDE8 / Dark #26262A)
     var codeBg = NSColor(name: nil) { appearance in
         let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
@@ -76,8 +116,17 @@ final class SyntaxHighlighter {
         storage.addAttribute(.font, value: typography.body, range: scope)
         storage.addAttribute(.foregroundColor, value: typography.ink, range: scope)
 
-        // bold_marker は開き・閉じの2個1組で来る(Zig側が閉じが見つかったときだけ両方を返すため)
+        storage.removeAttribute(.glaukQuote, range: scope)
+        storage.removeAttribute(.glaukRule, range: scope)
+        storage.removeAttribute(.glaukLinkURL, range: scope)
+        storage.removeAttribute(.obliqueness, range: scope)
+        storage.removeAttribute(.strikethroughStyle, range: scope)
+        storage.addAttribute(.paragraphStyle, value: typography.bodyParagraph, range: scope)
+
+        // marker は開き・閉じの2個1組で来る(Zig側が閉じが見つかったときだけ両方を返すため)
         var pendingBoldOpen: Span?
+        var pendingItalicOpen: Span?
+        var pendingStrikeOpen: Span?
         // wikilink_target は wikilink_name より必ず先に来る(開始位置ソート済みのため)。
         // 直前に見た target 名を覚えておけば、続く name の存在判定に使える。
         var currentTargetName: String?
@@ -106,6 +155,74 @@ final class SyntaxHighlighter {
                     pendingBoldOpen = span
                 }
                 if !onCursorLine { storage.addAttribute(.glaukHidden, value: true, range: span.range) }
+
+            case .italicMarker:
+                if let open = pendingItalicOpen {
+                    let start = NSMaxRange(open.range)
+                    let content = NSRange(location: start, length: span.range.location - start)
+                    if content.length > 0, NSMaxRange(content) <= storage.length {
+                        storage.addAttribute(.obliqueness,
+                                             value: typography.italicObliqueness, range: content)
+                    }
+                    pendingItalicOpen = nil
+                } else {
+                    pendingItalicOpen = span
+                }
+                if !onCursorLine { storage.addAttribute(.glaukHidden, value: true, range: span.range) }
+
+            case .strikeMarker:
+                if let open = pendingStrikeOpen {
+                    let start = NSMaxRange(open.range)
+                    let content = NSRange(location: start, length: span.range.location - start)
+                    if content.length > 0, NSMaxRange(content) <= storage.length {
+                        storage.addAttribute(.strikethroughStyle,
+                                             value: NSUnderlineStyle.single.rawValue, range: content)
+                    }
+                    pendingStrikeOpen = nil
+                } else {
+                    pendingStrikeOpen = span
+                }
+                if !onCursorLine { storage.addAttribute(.glaukHidden, value: true, range: span.range) }
+
+            case .listMarker:
+                storage.addAttribute(.foregroundColor, value: typography.accent, range: span.range)
+                let lineRange = (storage.string as NSString).lineRange(for: span.range)
+                storage.addAttribute(.paragraphStyle, value: typography.listParagraph, range: lineRange)
+
+            case .quoteMarker:
+                let lineRange = (storage.string as NSString).lineRange(for: span.range)
+                storage.addAttribute(.paragraphStyle, value: typography.quoteParagraph, range: lineRange)
+                // 縦棒は MarkdownLayoutManager が描く
+                storage.addAttribute(.glaukQuote, value: true, range: lineRange)
+                if !onCursorLine { storage.addAttribute(.glaukHidden, value: true, range: span.range) }
+
+            case .quoteText:
+                storage.addAttribute(.foregroundColor, value: typography.muted, range: span.range)
+
+            case .hrule:
+                // 罫線そのものは MarkdownLayoutManager が描く。--- の文字は隠す。
+                storage.addAttribute(.glaukRule, value: true, range: span.range)
+                storage.addAttribute(.foregroundColor, value: typography.muted, range: span.range)
+                if !onCursorLine { storage.addAttribute(.glaukHidden, value: true, range: span.range) }
+
+            case .linkHidden:
+                if !onCursorLine { storage.addAttribute(.glaukHidden, value: true, range: span.range) }
+
+            case .linkText:
+                storage.addAttribute(.foregroundColor, value: typography.accent, range: span.range)
+
+            case .linkURL:
+                let url = (storage.string as NSString).substring(with: span.range)
+                storage.addAttribute(.glaukLinkURL, value: url, range: span.range)
+
+            case .codeKeyword:
+                storage.addAttribute(.foregroundColor, value: typography.codeKeyword, range: span.range)
+            case .codeString:
+                storage.addAttribute(.foregroundColor, value: typography.codeString, range: span.range)
+            case .codeNumber:
+                storage.addAttribute(.foregroundColor, value: typography.codeNumber, range: span.range)
+            case .codeComment:
+                storage.addAttribute(.foregroundColor, value: typography.codeComment, range: span.range)
 
             case .wikilinkHidden:
                 if !onCursorLine { storage.addAttribute(.glaukHidden, value: true, range: span.range) }
