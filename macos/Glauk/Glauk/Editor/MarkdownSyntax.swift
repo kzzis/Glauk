@@ -8,6 +8,7 @@ enum SpanKind: UInt8 {
     case wikilinkHidden = 5, wikilinkName = 6, wikilinkTarget = 7
     case codeFence = 8, codeBlock = 9
     case inlineCodeMarker = 10, inlineCode = 11
+    case frontmatter = 12
 }
 
 struct Span {

@@ -12,6 +12,7 @@ pub const SpanKind = enum(u8) {
     code_block = 9, // フェンスに挟まれた中身の行
     inline_code_marker = 10, // ` の1文字(隠す)
     inline_code = 11, // ` ` に挟まれた中身
+    frontmatter = 12, // 文書先頭の --- ... --- 全体(たたむ)
 };
 
 /// Swiftに渡す構造体。UTF-16コードユニット単位。
@@ -157,9 +158,41 @@ fn fenceIndent(line: []const u8) ?usize {
     return null;
 }
 
+/// `---` だけの行か(前後の空白は許す)
+fn isDashFence(line: []const u8) bool {
+    const t = std.mem.trim(u8, line, " \t\r");
+    return t.len >= 3 and std.mem.allEqual(u8, t, '-');
+}
+
+/// 文書の先頭が `---` で始まり、閉じの `---` があるなら、その全体(末尾の改行を含む)を返す。
+/// 閉じが無いときは null。閉じが無いまま全文をたたむと編集不能になるため。
+fn frontmatterEnd(text: []const u8) ?usize {
+    const first_end = std.mem.indexOfScalarPos(u8, text, 0, '\n') orelse return null;
+    if (!isDashFence(text[0..first_end])) return null;
+
+    var p: usize = first_end + 1;
+    while (p <= text.len) {
+        const e = std.mem.indexOfScalarPos(u8, text, p, '\n') orelse text.len;
+        if (isDashFence(text[p..e])) {
+            // 閉じの行の改行まで含めると、たたんだときに空行が残らない
+            return if (e == text.len) text.len else e + 1;
+        }
+        if (e == text.len) break;
+        p = e + 1;
+    }
+    return null;
+}
+
 fn scanAll(gpa: std.mem.Allocator, text: []const u8, out: *std.ArrayList(ByteSpan)) !void {
     var line_start: usize = 0;
     var in_fence = false;
+
+    // --- フロントマター: 先頭の --- ... --- をひとまとまりで扱う ---
+    if (frontmatterEnd(text)) |end| {
+        try out.append(gpa, .{ .start = 0, .len = end, .kind = .frontmatter });
+        line_start = end;
+    }
+
     while (true) {
         const line_end = std.mem.indexOfScalarPos(u8, text, line_start, '\n') orelse text.len;
         const line = text[line_start..line_end];
@@ -348,6 +381,49 @@ test "an unclosed fence keeps the rest of the document as code" {
     try testing.expectEqual(@as(usize, 2), spans.len);
     try testing.expectEqual(@intFromEnum(SpanKind.code_fence), spans[0].kind);
     try testing.expectEqual(@intFromEnum(SpanKind.code_block), spans[1].kind);
+}
+
+test "frontmatter is one span covering the closing fence and its newline" {
+    const gpa = testing.allocator;
+    const spans = try parse(gpa, "---\na: 1\n---\n# 見出し");
+    defer gpa.free(spans);
+
+    try testing.expectEqual(@intFromEnum(SpanKind.frontmatter), spans[0].kind);
+    try testing.expectEqual(@as(u32, 0), spans[0].start);
+    try testing.expectEqual(@as(u32, 13), spans[0].len); // "---\na: 1\n---\n"
+    // 続く見出しは通常どおり解析される
+    try testing.expectEqual(@intFromEnum(SpanKind.heading1), spans[1].kind);
+    try testing.expectEqual(@as(u32, 13), spans[1].start);
+}
+
+test "frontmatter without a closing fence is not folded" {
+    const gpa = testing.allocator;
+    // 閉じが無いのにたたむと文書全体が消えて編集できなくなる
+    const spans = try parse(gpa, "---\na: 1\n# 見出し");
+    defer gpa.free(spans);
+
+    for (spans) |s| {
+        try testing.expect(s.kind != @intFromEnum(SpanKind.frontmatter));
+    }
+}
+
+test "--- in the middle of a document is not frontmatter" {
+    const gpa = testing.allocator;
+    const spans = try parse(gpa, "# 見出し\n---\na: 1\n---\n");
+    defer gpa.free(spans);
+
+    for (spans) |s| {
+        try testing.expect(s.kind != @intFromEnum(SpanKind.frontmatter));
+    }
+}
+
+test "markdown inside frontmatter is not parsed" {
+    const gpa = testing.allocator;
+    const spans = try parse(gpa, "---\ntitle: **bold** [[link]]\n---\n");
+    defer gpa.free(spans);
+
+    try testing.expectEqual(@as(usize, 1), spans.len);
+    try testing.expectEqual(@intFromEnum(SpanKind.frontmatter), spans[0].kind);
 }
 
 test "alias form hides the target and shows the alias" {

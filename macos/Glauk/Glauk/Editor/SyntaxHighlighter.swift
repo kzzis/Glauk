@@ -28,6 +28,9 @@ struct EditorTypography {
     /// Step 9 で本文がサンセリフになったときにここだけ等幅で残るように分けておく。
     var code = NSFont(name: "IBMPlexMono", size: 14)
         ?? NSFont.monospacedSystemFont(ofSize: 14, weight: .regular)
+    /// 「たたむ」ためのフォント。グリフを消すだけでは行が1行分残るため(実測: 4行が1行分残った)、
+    /// 極小フォントを併用して行の高さごと潰す。
+    var folded = NSFont.systemFont(ofSize: 0.01)
     /// glauk-design-doc.md の CodeBg(Light #EFEDE8 / Dark #26262A)
     var codeBg = NSColor(name: nil) { appearance in
         let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
@@ -50,9 +53,15 @@ final class SyntaxHighlighter {
     }
 
     /// `scope` の範囲だけを再計算する
-    func applySpans(to storage: NSTextStorage, in scope: NSRange, cursorLine: NSRange?) {
-        guard NSMaxRange(scope) <= storage.length else { return }
+    ///
+    /// ★ 実際に塗る範囲は、コードフェンスとフロントマターの境界まで広げる。
+    ///   途中で切ると開きの ``` や --- が見えないまま解析することになり、
+    ///   中身が通常のMarkdownとして解釈されてしまう。カーソル行だけを塗り直す
+    ///   呼び出し(カーソルの出入り)でも同じ拡張が要るので、ここで面倒を見る。
+    func applySpans(to storage: NSTextStorage, in requestedScope: NSRange, cursorLine: NSRange?) {
+        guard NSMaxRange(requestedScope) <= storage.length else { return }
         let ns = storage.string as NSString
+        let scope = expandToBlockBoundaries(in: ns, scope: requestedScope)
         let scopedText = ns.substring(with: scope)
         let spans = MarkdownParser.spans(in: scopedText).map { span in
             Span(range: NSRange(location: span.range.location + scope.location, length: span.range.length),
@@ -106,6 +115,13 @@ final class SyntaxHighlighter {
                 currentTargetName = name
                 storage.addAttribute(.glaukLinkTarget, value: name, range: span.range)
 
+            case .frontmatter:
+                // カーソルが入っていないときはたたむ。入れば素のまま編集できる。
+                if !onCursorLine {
+                    storage.addAttribute(.glaukHidden, value: true, range: span.range)
+                    storage.addAttribute(.font, value: typography.folded, range: span.range)
+                }
+
             case .codeFence:
                 // ``` の行は丸ごと隠す。カーソルを置いたときだけ見える。
                 if !onCursorLine { storage.addAttribute(.glaukHidden, value: true, range: span.range) }
@@ -145,10 +161,40 @@ final class SyntaxHighlighter {
             scope = ns.paragraphRange(for: NSRange(location: scope.location - 1, length: 1))
                 .union(scope)
         }
-        // ★ コードブロックの途中で切ると、開きの ``` が見えないまま解析することになり、
-        //   コードの中身が通常のMarkdownとして解釈されてしまう。ブロック全体まで広げる。
-        scope = expandToFenceBoundaries(in: ns, scope: scope)
+        // ブロック境界への拡張は applySpans が面倒を見る
         applySpans(to: storage, in: scope, cursorLine: cursorLine)
+    }
+
+    /// ``` のブロック / 先頭のフロントマターに掛かっているなら、その全体を含むよう広げる
+    private func expandToBlockBoundaries(in ns: NSString, scope: NSRange) -> NSRange {
+        var result = expandToFenceBoundaries(in: ns, scope: scope)
+        if let fm = frontmatterRange(in: ns),
+           NSIntersectionRange(fm, scope).length > 0 || scope.location <= NSMaxRange(fm) {
+            result = result.union(fm)
+        }
+        return result.clamped(to: ns.length)
+    }
+
+    /// 文書先頭の `---` … `---`(閉じの改行まで)。Zig の frontmatterEnd と同じ判定。
+    private func frontmatterRange(in ns: NSString) -> NSRange? {
+        guard ns.length > 0 else { return nil }
+        let firstLine = ns.lineRange(for: NSRange(location: 0, length: 0))
+        guard isDashFence(ns.substring(with: firstLine)) else { return nil }
+
+        var p = NSMaxRange(firstLine)
+        while p < ns.length {
+            let line = ns.lineRange(for: NSRange(location: p, length: 0))
+            if isDashFence(ns.substring(with: line)) {
+                return NSRange(location: 0, length: NSMaxRange(line))
+            }
+            p = NSMaxRange(line)
+        }
+        return nil   // 閉じが無いならフロントマターではない
+    }
+
+    private func isDashFence(_ line: String) -> Bool {
+        let t = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        return t.count >= 3 && t.allSatisfy { $0 == "-" }
     }
 
     /// ``` で囲まれたブロックに掛かっているなら、そのブロック全体を含むよう広げる
