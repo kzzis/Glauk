@@ -107,9 +107,6 @@ struct MarkdownTextView: NSViewRepresentable {
             // cursorLine を nil にするとカーソル行のマーカーまで隠れてしまう
             let cursorLine = ns.lineRange(for: NSRange(location: safeLocation, length: 0))
             context.coordinator.highlighter.apply(to: storage, cursorLine: cursorLine)
-            #if DEBUG
-            context.coordinator.dumpHighlightState("updateNSView(new=\(isNewDocument))", textView)
-            #endif
         }
     }
 
@@ -255,39 +252,6 @@ struct MarkdownTextView: NSViewRepresentable {
             if parent.typewriterScroll { scrollCurrentLineToCenter(textView) }
         }
 
-        #if DEBUG
-        /// ライブプレビューが実際に効いているかを実機で測る(原因が分かったら消してよい)
-        func dumpHighlightState(_ label: String, _ textView: NSTextView) {
-            guard let st = textView.textStorage else { return }
-            let whole = NSRange(location: 0, length: st.length)
-            var hidden = 0, headingChars = 0, boldChars = 0
-            st.enumerateAttribute(.glaukHidden, in: whole) { v, r, _ in
-                if v != nil { hidden += r.length }
-            }
-            st.enumerateAttribute(.font, in: whole) { v, r, _ in
-                guard let f = v as? NSFont else { return }
-                if f.pointSize > 17 { headingChars += r.length; return }
-                let tr = f.fontDescriptor.object(forKey: .traits) as? [NSFontDescriptor.TraitKey: Any]
-                if let w = tr?[.weight] as? CGFloat, w >= 0.3 { boldChars += r.length }
-            }
-            let spans = MarkdownParser.spans(in: st.string)
-            var nulls = 0
-            if let lm = textView.layoutManager, let tc = textView.textContainer, hidden > 0 {
-                lm.ensureLayout(for: tc)
-                st.enumerateAttribute(.glaukHidden, in: whole) { v, r, stop in
-                    guard v != nil else { return }
-                    let gr = lm.glyphRange(forCharacterRange: r, actualCharacterRange: nil)
-                    for g in gr.location..<NSMaxRange(gr)
-                    where lm.propertyForGlyph(at: g).contains(.null) { nulls += 1 }
-                    stop.pointee = true   // 先頭の1範囲だけ見れば十分
-                }
-            }
-            print("[glauk/hl] \(label) len=\(st.length) spans=\(spans.count) hidden=\(hidden) "
-                + "見出し文字=\(headingChars) 太字文字=\(boldChars) 先頭null=\(nulls) "
-                + "docH=\(Int(textView.frame.height))")
-        }
-        #endif
-
         /// 編集サイクルを抜けた次のターンで、まとめて1回だけ塗る
         private func scheduleHighlight() {
             guard !highlightScheduled else { return }
@@ -319,9 +283,6 @@ struct MarkdownTextView: NSViewRepresentable {
             }
             highlighter.applySpans(to: storage, in: cursorLine, cursorLine: cursorLine)
             lastCursorLine = cursorLine
-            #if DEBUG
-            dumpHighlightState("runPendingHighlight", textView)
-            #endif
         }
 
         /// リンクをクリックしたときに呼ばれる。実際にノートを開く処理は Step 5b で差し替える
