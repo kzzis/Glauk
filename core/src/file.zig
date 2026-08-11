@@ -18,12 +18,24 @@ export fn glauk_write_file(path: [*:0]const u8, data: [*]const u8, len: usize) c
     const p = std.mem.span(path);
     var buf: [4096]u8 = undefined;
 
-    var af = std.fs.cwd().atomicFile(p, .{ .write_buffer = &buf }) catch return false;
+    var af = std.fs.cwd().atomicFile(p, .{ .write_buffer = &buf }) catch |err| {
+        std.debug.print("[glauk] atomicFile failed for \"{s}\": {s}\n", .{ p, @errorName(err) });
+        return false;
+    };
     defer af.deinit();
 
-    af.file_writer.interface.writeAll(data[0..len]) catch return false;
-    af.file_writer.interface.flush() catch return false;
-    af.finish() catch return false;
+    af.file_writer.interface.writeAll(data[0..len]) catch |err| {
+        std.debug.print("[glauk] writeAll failed for \"{s}\": {s}\n", .{ p, @errorName(err) });
+        return false;
+    };
+    af.file_writer.interface.flush() catch |err| {
+        std.debug.print("[glauk] flush failed for \"{s}\": {s}\n", .{ p, @errorName(err) });
+        return false;
+    };
+    af.finish() catch |err| {
+        std.debug.print("[glauk] finish failed for \"{s}\": {s}\n", .{ p, @errorName(err) });
+        return false;
+    };
 
     watch.glauk_mark_self_write();
     return true;
