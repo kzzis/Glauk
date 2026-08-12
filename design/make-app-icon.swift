@@ -90,6 +90,40 @@ struct MakeIcon {
             (256, "icon_256x256"), (512, "icon_256x256@2x"),
             (512, "icon_512x512"), (1024, "icon_512x512@2x"),
         ]
+        // Contents.json も一緒に書く。
+        // ★ PNG を置くだけでは駄目で、ここに filename が無いとスロットが空のまま
+        //   =アイコンが出ない。手で書くと必ず食い違うので、生成側で面倒を見る。
+        let slots: [(String, String, String)] = [
+            ("16x16", "1x", "icon_16x16"), ("16x16", "2x", "icon_16x16@2x"),
+            ("32x32", "1x", "icon_32x32"), ("32x32", "2x", "icon_32x32@2x"),
+            ("128x128", "1x", "icon_128x128"), ("128x128", "2x", "icon_128x128@2x"),
+            ("256x256", "1x", "icon_256x256"), ("256x256", "2x", "icon_256x256@2x"),
+            ("512x512", "1x", "icon_512x512"), ("512x512", "2x", "icon_512x512@2x"),
+        ]
+        let entries = slots.map { size, scale, name in
+            """
+                {
+                  "filename" : "\(name).png",
+                  "idiom" : "mac",
+                  "scale" : "\(scale)",
+                  "size" : "\(size)"
+                }
+            """
+        }.joined(separator: ",\n")
+        let contents = """
+        {
+          "images" : [
+        \(entries)
+          ],
+          "info" : {
+            "author" : "xcode",
+            "version" : 1
+          }
+        }
+
+        """
+        try! contents.write(toFile: outDir + "/Contents.json", atomically: false, encoding: .utf8)
+
         var written: Set<String> = []
         for (px, name) in sizes {
             let out = NSImage(size: NSSize(width: px, height: px))
