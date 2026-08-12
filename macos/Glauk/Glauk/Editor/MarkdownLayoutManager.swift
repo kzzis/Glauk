@@ -19,6 +19,10 @@ final class MarkdownLayoutManager: NSLayoutManager {
     var calloutTint: (String) -> NSColor = { _ in .systemBlue }
     var tagBgColor = NSColor.systemBlue.withAlphaComponent(0.18)
     var tagCornerRadius: CGFloat = 4
+    var diffAddedBgColor = NSColor.systemGreen.withAlphaComponent(0.14)
+    var diffRemovedBgColor = NSColor.systemRed.withAlphaComponent(0.14)
+    var diffAddedBarColor = NSColor.systemGreen
+    var diffRemovedBarColor = NSColor.systemRed
 
     /// 属性が連続している範囲ごとに、その行たちを囲む矩形を返す
     private func blockRects(for key: NSAttributedString.Key,
@@ -30,7 +34,12 @@ final class MarkdownLayoutManager: NSLayoutManager {
             guard value != nil, range.length > 0 else { return }
             let glyphs = glyphRange(forCharacterRange: range, actualCharacterRange: nil)
             var union: NSRect?
-            enumerateLineFragments(forGlyphRange: glyphs) { rect, _, _, _, _ in
+            enumerateLineFragments(forGlyphRange: glyphs) { rect, _, _, fragGlyphs, _ in
+                // ★ 行頭に来た隠し文字(``` や > や `)は幅が0なので、直前の行の
+                //   フラグメントに吸い込まれる。そのぶんまで囲むと、ブロックが
+                //   1行上まで伸びる。範囲の始まりより前から始まるフラグメントは数えない。
+                let chars = self.characterRange(forGlyphRange: fragGlyphs, actualGlyphRange: nil)
+                guard chars.location >= range.location else { return }
                 union = union.map { $0.union(rect) } ?? rect
             }
             if let u = union {
@@ -51,14 +60,51 @@ final class MarkdownLayoutManager: NSLayoutManager {
         var result: [NSRect] = []
         storage.enumerateAttribute(key, in: charRange) { value, range, _ in
             guard value != nil, range.length > 0 else { return }
-            let glyphs = glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+
+            // ★ 端の隠し文字を落としてから測る。
+            //   隠したグリフは幅が0なので、行頭の `` ` `` は「直前の行」の
+            //   フラグメントに入る(実測: 空行の "\n" と `` ` `` が同じ断片)。
+            //   その状態だと enumerateEnclosingRects が「2行にまたがる選択」とみなし、
+            //   前の空行が横幅いっぱいに塗られる。
+            var trimmed = range
+            while trimmed.length > 0,
+                  storage.attribute(.glaukHidden, at: trimmed.location, effectiveRange: nil) != nil {
+                trimmed.location += 1
+                trimmed.length -= 1
+            }
+            while trimmed.length > 0,
+                  storage.attribute(.glaukHidden, at: NSMaxRange(trimmed) - 1,
+                                    effectiveRange: nil) != nil {
+                trimmed.length -= 1
+            }
+            guard trimmed.length > 0 else { return }
+
+            let glyphs = glyphRange(forCharacterRange: trimmed, actualCharacterRange: nil)
             enumerateEnclosingRects(forGlyphRange: glyphs,
                                     withinSelectedGlyphRange: NSRange(location: NSNotFound, length: 0),
                                     in: container) { rect, _ in
-                result.append(rect.offsetBy(dx: origin.x, dy: origin.y))
+                guard rect.width > 0.5 else { return }
+                result.append(self.hugText(rect, charIndex: trimmed.location)
+                    .offsetBy(dx: origin.x, dy: origin.y))
             }
         }
         return result
+    }
+
+    /// 行フラグメントの高さではなく、文字そのものの高さに合わせた矩形にする。
+    /// ★ lineHeightMultiple で増えた分は文字の「上」に付く。フラグメントの高さのまま
+    ///   下地を敷くと、1行ぶん上にずれて「上の行に帯が出ている」ように見える。
+    private func hugText(_ rect: NSRect, charIndex: Int) -> NSRect {
+        let glyph = glyphIndexForCharacter(at: charIndex)
+        guard glyph < numberOfGlyphs else { return rect }
+        let fragment = lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
+        let baseline = fragment.minY + location(forGlyphAt: glyph).y
+        let font = (textStorage?.attribute(.font, at: charIndex, effectiveRange: nil)
+            as? NSFont) ?? NSFont.systemFont(ofSize: 15)
+        return NSRect(x: rect.minX,
+                      y: baseline - font.ascender,
+                      width: rect.width,
+                      height: font.ascender - font.descender)
     }
 
     /// 目印を付けた文字の「見た目の中心」を返す。
@@ -115,6 +161,20 @@ final class MarkdownLayoutManager: NSLayoutManager {
             }
         }
 
+        // --- diff の + / - 行: コードブロックの中に薄い下地を敷く ---
+        // ★ コードブロックの角丸の「あと」に描く。先に描くと上から塗り潰される。
+        for (range, rect) in blockRects(for: .glaukDiff, in: charRange, origin: origin) {
+            guard let added = storage.attribute(.glaukDiff, at: range.location,
+                                                effectiveRange: nil) as? Bool else { continue }
+            let box = NSRect(x: origin.x + container.lineFragmentPadding, y: rect.minY,
+                             width: fullWidth, height: rect.height)
+            (added ? diffAddedBgColor : diffRemovedBgColor).setFill()
+            box.fill()
+            // 左端に濃い縦帯。色が薄くても + と - を見分けられるように。
+            (added ? diffAddedBarColor : diffRemovedBarColor).setFill()
+            NSRect(x: box.minX, y: box.minY, width: 2, height: box.height).fill()
+        }
+
         // --- タグ: 文字に沿った角丸の下地 ---
         for rect in inlineRects(for: .glaukTag, in: charRange, origin: origin, container: container) {
             let box = rect.insetBy(dx: -3, dy: 2)
@@ -152,9 +212,25 @@ final class MarkdownLayoutManager: NSLayoutManager {
             }
         }
 
-        // --- テーブルの縦罫線: 透明にした `|` の位置に引く ---
+        // --- テーブルの縦罫線 ---
+        // ★ 桁揃えができた表は「列の目標位置」に引く。実際に置かれた `|` の位置で
+        //   引くと、計測と組版の差が残って行ごとに数ptずれる(実測3.5pt)。
+        var ruledTables: [NSRange] = []
+        for (range, rect) in blockRects(for: .glaukTableColumns, in: charRange, origin: origin) {
+            guard let xs = storage.attribute(.glaukTableColumns, at: range.location,
+                                             effectiveRange: nil) as? [NSNumber] else { continue }
+            ruledTables.append(range)
+            tableRuleColor.setFill()
+            for x in xs {
+                NSRect(x: (origin.x + CGFloat(x.doubleValue)).rounded(),
+                       y: rect.minY, width: 1, height: rect.height).fill()
+            }
+        }
+
+        // 桁揃えを止めている表(カーソルが乗っている表)は `|` の位置に引く
         storage.enumerateAttribute(.glaukTablePipe, in: charRange) { value, range, _ in
             guard value != nil else { return }
+            if ruledTables.contains(where: { NSIntersectionRange($0, range).length > 0 }) { return }
             let glyphs = glyphRange(forCharacterRange: range, actualCharacterRange: nil)
             let rect = boundingRect(forGlyphRange: glyphs, in: container)
             guard rect.width > 0 else { return }

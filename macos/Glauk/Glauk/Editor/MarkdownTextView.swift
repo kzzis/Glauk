@@ -39,6 +39,10 @@ struct MarkdownTextView: NSViewRepresentable {
         layoutManager.calloutTint = typography.calloutTint
         layoutManager.tagBgColor = typography.tagBg
         layoutManager.tagCornerRadius = typography.tagCornerRadius
+        layoutManager.diffAddedBgColor = typography.codeAddedBg
+        layoutManager.diffRemovedBgColor = typography.codeRemovedBg
+        layoutManager.diffAddedBarColor = typography.codeAdded
+        layoutManager.diffRemovedBarColor = typography.codeRemoved
         let storage = NSTextStorage()
         storage.delegate = context.coordinator
         storage.addLayoutManager(layoutManager)

@@ -64,6 +64,12 @@ struct EditorTypography {
     var codeComment = NSColor.secondaryLabelColor
     /// ブロック右上に出す言語名
     var codeLangLabel = NSColor.tertiaryLabelColor
+    // --- diff ---
+    var codeAdded = dynamicColor(dark: 0x7EE787, light: 0x116329)
+    var codeRemoved = dynamicColor(dark: 0xFFA198, light: 0x82071E)
+    var codeMeta = dynamicColor(dark: 0x8B949E, light: 0x57606A)
+    var codeAddedBg = dynamicColor(dark: 0x0F3A20, light: 0xDAFBE1)
+    var codeRemovedBg = dynamicColor(dark: 0x4A1418, light: 0xFFEBE9)
 
     /// 引用の縦棒の色と太さ
     var quoteBar = NSColor.systemRed
@@ -198,6 +204,9 @@ final class SyntaxHighlighter {
         storage.removeAttribute(.glaukCheckbox, range: scope)
         storage.removeAttribute(.glaukBullet, range: scope)
         storage.removeAttribute(.glaukCallout, range: scope)
+        storage.removeAttribute(.glaukTag, range: scope)
+        storage.removeAttribute(.glaukDiff, range: scope)
+        storage.removeAttribute(.glaukTableColumns, range: scope)
         storage.addAttribute(.paragraphStyle, value: typography.bodyParagraph, range: scope)
 
         // ★ Obsidian と同じ考え方: カーソルがテーブルの中にある間は原文のまま見せ、
@@ -378,6 +387,18 @@ final class SyntaxHighlighter {
                 let lineRange = ns.lineRange(for: span.range)
                 storage.addAttribute(.glaukCallout, value: lastCalloutType, range: lineRange)
                 storage.removeAttribute(.glaukQuote, range: lineRange)
+
+            case .codeAdded, .codeRemoved:
+                let added = span.kind == .codeAdded
+                storage.addAttribute(.foregroundColor,
+                                     value: added ? typography.codeAdded : typography.codeRemoved,
+                                     range: span.range)
+                // 行まるごとの下地は MarkdownLayoutManager が描く。
+                // ★ 改行まで含めないと、折り返しのない短い行で帯が途切れる。
+                storage.addAttribute(.glaukDiff, value: added, range: ns.lineRange(for: span.range))
+
+            case .codeMeta:
+                storage.addAttribute(.foregroundColor, value: typography.codeMeta, range: span.range)
 
             case .embedMarker, .escape:
                 if !onCursorLine { storage.addAttribute(.glaukHidden, value: true, range: span.range) }
@@ -580,7 +601,7 @@ final class SyntaxHighlighter {
             guard pipes.count >= 2 else { continue }
             let prefix = pipes.map { p -> CGFloat in
                 let r = NSRange(location: line.location, length: p - line.location)
-                return r.length > 0 ? typesetWidth(storage.attributedSubstring(from: r)) : 0
+                return r.length > 0 ? typesetWidth(visibleText(storage, in: r)) : 0
             }
             rows.append(Row(pipes: pipes, prefix: prefix))
         }
@@ -614,11 +635,39 @@ final class SyntaxHighlighter {
                 applied += extra
             }
         }
+
+        // ★ 罫線は「実際に置かれた `|` の位置」ではなく「列の目標位置」に引く。
+        //   字送りだけで揃えると、CoreText の計測とレイアウトマネージャの組版の差が
+        //   残って行ごとに数ptずれる(実測: 最後の罫線が3.5ptばらついた)。
+        //   目標位置を渡してしまえば、計測誤差があっても罫線は必ず一直線になる。
+        let padding = storage.layoutManagers.first?.textContainers.first?.lineFragmentPadding ?? 0
+        let left = padding + typography.codeParagraph.firstLineHeadIndent
+        var xs: [NSNumber] = [NSNumber(value: Double(left + rows[0].prefix[0]))]
+        var running = rows[0].prefix[0]
+        for width in segment {
+            running += width
+            xs.append(NSNumber(value: Double(left + running)))
+        }
+        storage.addAttribute(.glaukTableColumns, value: xs, range: table)
     }
 
     /// 実際の組版と同じ幅を測る。
     /// NSAttributedString.size() はレイアウトマネージャの結果と数pt ずれるため、
     /// 桁揃えに使うと `|` の位置が揃いきらない(実測で最大5ptずれた)。
+    /// 隠した文字を落とした文字列を返す。
+    /// ★ 桁揃えの計測に必須。`.glaukHidden` はグリフを null にして幅を0にする
+    ///   レイアウトマネージャ側の仕組みなので、CoreText で測ると隠した文字まで
+    ///   幅に入ってしまう。セルに `` ` `` や `**` が入っている表で、
+    ///   最後の `|` が最大55ptずれた(実測)。
+    private func visibleText(_ storage: NSTextStorage, in range: NSRange) -> NSAttributedString {
+        let out = NSMutableAttributedString()
+        storage.enumerateAttribute(.glaukHidden, in: range) { hidden, sub, _ in
+            guard hidden == nil else { return }
+            out.append(storage.attributedSubstring(from: sub))
+        }
+        return out
+    }
+
     /// リストマーカーの手前にある空白から入れ子の深さを出す。
     /// タブは1段、スペースは2つで1段(Obsidian の既定に近い)。
     private func indentOf(_ span: Span, in ns: NSString) -> Int {
