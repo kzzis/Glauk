@@ -10,21 +10,29 @@ final class NoteIndex: ObservableObject {
     @Published private(set) var hasFolder = false
     /// 索引の中身が変わるたびに増える。エディタは「リンクの色を塗り直す合図」に使う。
     @Published private(set) var revision = 0
+    /// サイドバー用のツリー。★ 同名で潰れる前の「全パス」から組む。
+    ///   names は同名を1つに寄せてあるので、そのまま使うとノートが消える。
+    @Published private(set) var tree: [NoteNode] = []
     private var pathByName: [String: String] = [:]
+    private var allPaths: [String] = []
 
     /// ノートフォルダからの相対パス一覧から索引を作る(例: "notes/設計メモ.md")
     func replaceAll(with paths: [String]) {
+        let sorted = paths.filter { $0.hasSuffix(".md") }.sorted()
         var map: [String: String] = [:]
-        for path in paths where path.hasSuffix(".md") {
+        for path in sorted {
             let noExt = (path as NSString).deletingPathExtension
             let leaf = (noExt as NSString).lastPathComponent
             // 同名ノートは階層が浅い方を採用する(Obsidian の曖昧リンクの挙動に近い)
             if let existing = map[leaf], depth(of: existing) <= depth(of: path) { continue }
             map[leaf] = path
         }
-        guard map != pathByName else { return }   // 中身が同じなら塗り直しの合図も出さない
+        // 中身が同じなら塗り直しの合図も出さない
+        guard map != pathByName || sorted != allPaths else { return }
         pathByName = map
+        allPaths = sorted
         names = map.keys.sorted()
+        tree = NoteTree.build(from: sorted)
         revision += 1
     }
 

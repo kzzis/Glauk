@@ -6,10 +6,20 @@ struct ContentView: View {
     @EnvironmentObject var notesFolder: NotesFolder
     @StateObject private var document = DocumentStore()
     @State private var showSwitcher = false
+    /// ツリーの開閉は覚えておく。畳めば仕様書どおりの単一画面に戻る。
+    @AppStorage("glauk.showTree") private var showTree = true
 
     var body: some View {
         VStack(spacing: 0) {
             HStack {
+                Button {
+                    showTree.toggle()
+                } label: {
+                    Image(systemName: showTree ? "sidebar.left" : "sidebar.leading")
+                }
+                .keyboardShortcut("\\", modifiers: .command)
+                .help("ツリーを出し入れ (⌘\\)")
+
                 // ★ フォルダ未設定でも押せるようにしておく。disabled にすると
                 //   ⌘O が無反応になり、「vault を指定する場所が無い」ように見える。
                 //   未設定のときはスイッチャー側が「フォルダを選ぶ…」を出す。
@@ -35,10 +45,21 @@ struct ContentView: View {
             }
             .padding(8)
 
-            MarkdownTextView(text: $document.text,
-                             noteIndex: noteIndex,
-                             loadRevision: document.revision,
-                             indexRevision: noteIndex.revision)
+            HStack(spacing: 0) {
+                if showTree {
+                    NoteTreeView(currentPath: currentRelativePath) { relative in
+                        guard let root = notesFolder.root else { return }
+                        switchTo(path: root + "/" + relative)
+                    }
+                    .frame(width: 240)
+                    Divider()
+                }
+
+                MarkdownTextView(text: $document.text,
+                                 noteIndex: noteIndex,
+                                 loadRevision: document.revision,
+                                 indexRevision: noteIndex.revision)
+            }
         }
         .frame(minWidth: 900, minHeight: 700)
         .overlay {
@@ -83,6 +104,14 @@ struct ContentView: View {
             Button("vault を選ぶ…") { notesFolder.chooseWithPanel() }
                 .font(.caption)
         }
+    }
+
+    /// いま開いているファイルの、vault からの相対パス。vault の外なら nil。
+    private var currentRelativePath: String? {
+        guard let root = notesFolder.root, let path = document.path else { return nil }
+        let prefix = root.hasSuffix("/") ? root : root + "/"
+        guard path.hasPrefix(prefix) else { return nil }
+        return String(path.dropFirst(prefix.count))
     }
 
     private func switchTo(path: String) {
