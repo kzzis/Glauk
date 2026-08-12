@@ -28,8 +28,9 @@ struct ContentView: View {
                 } label: {
                     Image(systemName: showTree ? "sidebar.left" : "sidebar.leading")
                 }
-                .keyboardShortcut("\\", modifiers: .command)
-                .help("ツリーを出し入れ (⌘\\)")
+                // ★ ⌘\ はメニュー側(GlaukApp)が持つ。ここにも付けると同じキーの
+                //   引き受け手が2つになる。
+                .help("ノートツリーを出し入れ (⌘\\)")
 
                 Button { goBack() } label: { Image(systemName: "chevron.left") }
                     .keyboardShortcut("[", modifiers: .command)
