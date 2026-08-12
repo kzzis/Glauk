@@ -11,6 +11,8 @@ struct MarkdownTextView: NSViewRepresentable {
     /// 索引が変わるたびに増える値。これが変わったら `[[リンク]]` の色だけ塗り直す
     /// (走査は非同期なので、初回表示のときは索引がまだ空のことがある)。
     var indexRevision = 0
+    /// `[[リンク]]` がクリックされた。名前(`|`や`#`を落としたもの)が渡る。
+    var onOpenNote: (String) -> Void = { _ in }
     var typewriterScroll: Bool = true
 
     func makeCoordinator() -> Coordinator {
@@ -88,6 +90,9 @@ struct MarkdownTextView: NSViewRepresentable {
     // SwiftUI側の状態が変わるたびに呼ばれる
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         guard let textView = scrollView.documentView as? NSTextView else { return }
+        // ★ 下の guard で早期 return する経路が多いので、必ず先に更新する。
+        //   ここを後ろに置くと、リンクをクリックしても古い(何もしない)閉包が呼ばれる。
+        context.coordinator.onOpenNote = onOpenNote
         // ★ 変換中(marked text)は絶対に触らない。
         //   下の `textView.string = text` はテキストビューを丸ごと置き換えるので、
         //   変換中に SwiftUI の再描画が挟まると未確定の文字列ごと消える。
@@ -144,6 +149,7 @@ struct MarkdownTextView: NSViewRepresentable {
         var textStorage: NSTextStorage?   // NSTextView/NSTextContainerはlayoutManagerを弱参照するため、これが無いと解放されて編集不能になる
         var lastLoadRevision: Int?
         var lastIndexRevision = 0
+        var onOpenNote: (String) -> Void = { _ in }
         private var lastCursorLine: NSRange?
         private var pendingEditedRange: NSRange?
         private var highlightScheduled = false
@@ -312,17 +318,20 @@ struct MarkdownTextView: NSViewRepresentable {
             lastCursorLine = cursorLine
         }
 
-        /// リンクをクリックしたときに呼ばれる。実際にノートを開く処理は Step 5b で差し替える
+        /// `[[リンク]]` をクリックした。開くかどうかの判断は ContentView に任せる
+        /// (未作成なら作成の確認を出す、履歴に積む、といった判断はここの仕事ではない)。
         func editorTextView(_ tv: NSTextView, didClickWikilink name: String) {
             // mouseDown からの呼び出しなので常にメインスレッド
-            MainActor.assumeIsolated {
-                if parent.noteIndex.exists(name) {
-                    print("[link] open: \(name) → \(parent.noteIndex.path(for: name) ?? "?")")
-                } else {
-                    print("[link] not found: \(name)")
-                    NSSound.beep()
-                }
+            MainActor.assumeIsolated { onOpenNote(name) }
+        }
+
+        /// `[text](url)` をクリックした。外のブラウザに渡す。
+        func editorTextView(_ tv: NSTextView, didClickURL url: String) {
+            guard let parsed = URL(string: url), parsed.scheme != nil else {
+                NSSound.beep()      // 相対パスなど、いまは開けないもの
+                return
             }
+            NSWorkspace.shared.open(parsed)
         }
 
         private func scrollCurrentLineToCenter(_ textView: NSTextView) {
