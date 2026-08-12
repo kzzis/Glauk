@@ -212,9 +212,25 @@ final class MarkdownLayoutManager: NSLayoutManager {
             }
         }
 
-        // --- テーブルの縦罫線: 透明にした `|` の位置に引く ---
+        // --- テーブルの縦罫線 ---
+        // ★ 桁揃えができた表は「列の目標位置」に引く。実際に置かれた `|` の位置で
+        //   引くと、計測と組版の差が残って行ごとに数ptずれる(実測3.5pt)。
+        var ruledTables: [NSRange] = []
+        for (range, rect) in blockRects(for: .glaukTableColumns, in: charRange, origin: origin) {
+            guard let xs = storage.attribute(.glaukTableColumns, at: range.location,
+                                             effectiveRange: nil) as? [NSNumber] else { continue }
+            ruledTables.append(range)
+            tableRuleColor.setFill()
+            for x in xs {
+                NSRect(x: (origin.x + CGFloat(x.doubleValue)).rounded(),
+                       y: rect.minY, width: 1, height: rect.height).fill()
+            }
+        }
+
+        // 桁揃えを止めている表(カーソルが乗っている表)は `|` の位置に引く
         storage.enumerateAttribute(.glaukTablePipe, in: charRange) { value, range, _ in
             guard value != nil else { return }
+            if ruledTables.contains(where: { NSIntersectionRange($0, range).length > 0 }) { return }
             let glyphs = glyphRange(forCharacterRange: range, actualCharacterRange: nil)
             let rect = boundingRect(forGlyphRange: glyphs, in: container)
             guard rect.width > 0 else { return }

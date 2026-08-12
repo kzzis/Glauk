@@ -70,6 +70,8 @@ extension NSAttributedString.Key {
     static let glaukTag = NSAttributedString.Key("glauk.tag")
     /// diff の + / - の行。値は追加なら true(行の左に色帯を描く)
     static let glaukDiff = NSAttributedString.Key("glauk.diff")
+    /// テーブルの縦罫線を引くx座標(テキストコンテナ基準)。値は [NSNumber]
+    static let glaukTableColumns = NSAttributedString.Key("glauk.tableColumns")
 }
 
 enum MarkdownParser {
