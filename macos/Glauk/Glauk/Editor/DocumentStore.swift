@@ -18,6 +18,9 @@ final class DocumentStore: ObservableObject {
     private var suppressAutosave = false
     private let debounce: Duration = .milliseconds(800)
 
+    /// 失敗を上部バーに出す。ナビゲータからも使う。
+    func report(_ message: String) { lastError = message }
+
     func open(path newPath: String) {
         guard let contents = GlaukFile.read(path: newPath) else {
             lastError = "開けませんでした: \(newPath)"

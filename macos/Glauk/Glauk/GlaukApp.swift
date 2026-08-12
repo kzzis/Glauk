@@ -21,7 +21,9 @@ struct GlaukApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            // ★ ナビゲータは DocumentStore と索引を両方持つので、
+            //   ContentView の init で組み立てる。ここで渡しておく。
+            ContentView(noteIndex: noteIndex, notesFolder: notesFolder)
                 .environmentObject(noteIndex)
                 .environmentObject(notesFolder)
         }
