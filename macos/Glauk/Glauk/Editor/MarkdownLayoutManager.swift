@@ -221,7 +221,9 @@ final class MarkdownLayoutManager: NSLayoutManager {
                                              effectiveRange: nil) as? [NSNumber] else { continue }
             ruledTables.append(range)
             tableRuleColor.setFill()
-            for x in xs {
+            // ★ 端の `|` には引かない。外枠がすぐ左右にあるので、引くと
+            //   幅の無い空っぽの列が1本できたように見える。
+            for x in xs.dropFirst().dropLast() {
                 NSRect(x: (origin.x + CGFloat(x.doubleValue)).rounded(),
                        y: rect.minY, width: 1, height: rect.height).fill()
             }
