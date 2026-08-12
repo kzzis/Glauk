@@ -73,7 +73,31 @@ final class NoteIndex: ObservableObject {
         revision += 1
     }
 
-    /// 前方一致を先に、部分一致を後に
+    /// クイックスイッチャー用。★ 件数を絞らない。
+    /// `candidates` は補完ポップアップ用に上限があるので、そのまま使うと
+    /// 「全部出てこない」ことになる。並びは
+    /// 名前の前方一致 → 名前の部分一致 → パスの部分一致 の順。
+    func searchResults(matching query: String) -> [String] {
+        guard !query.isEmpty else { return names }
+        let lower = query.lowercased()
+        var namePrefix: [String] = []
+        var nameContains: [String] = []
+        var pathContains: [String] = []
+        for name in names {
+            let lowered = name.lowercased()
+            if lowered.hasPrefix(lower) {
+                namePrefix.append(name)
+            } else if lowered.contains(lower) {
+                nameContains.append(name)
+            } else if pathByName[name]?.lowercased().contains(lower) == true {
+                // フォルダ名でも辿れるようにする(例: "Laravel" で資料フォルダ配下が出る)
+                pathContains.append(name)
+            }
+        }
+        return namePrefix + nameContains + pathContains
+    }
+
+    /// `[[` 補完のポップアップ用。前方一致を先に、部分一致を後に
     func candidates(matching query: String, limit: Int = 20) -> [String] {
         guard !query.isEmpty else { return Array(names.prefix(limit)) }
         let lower = query.lowercased()

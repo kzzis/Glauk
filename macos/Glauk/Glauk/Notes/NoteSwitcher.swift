@@ -15,10 +15,8 @@ struct NoteSwitcherView: View {
     @State private var selection = 0
     @FocusState private var focused: Bool
 
-    private let maxRows = 30
-
     private var matches: [String] {
-        noteIndex.candidates(matching: query, limit: maxRows)
+        noteIndex.searchResults(matching: query)
     }
 
     var body: some View {
@@ -49,6 +47,13 @@ struct NoteSwitcherView: View {
                     .onKeyPress(.upArrow) { move(by: -1) }
                     .onKeyPress(.return) { openSelected() }
                     .onKeyPress(.escape) { onCancel(); return .handled }
+                // 全件出ていることが分かるように件数を添える
+                if noteIndex.hasFolder {
+                    Text(count)
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .monospacedDigit()
+                }
             }
             .padding(12)
 
@@ -125,6 +130,12 @@ struct NoteSwitcherView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 24)
+    }
+
+    private var count: String {
+        let hits = matches.count
+        let all = noteIndex.names.count
+        return hits == all ? "\(all)" : "\(hits) / \(all)"
     }
 
     private func folder(of name: String) -> String? {
