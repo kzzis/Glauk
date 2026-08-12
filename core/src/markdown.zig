@@ -36,6 +36,27 @@ pub const SpanKind = enum(u8) {
     code_type = 30, // 大文字始まりの識別子
     code_function = 31, // 直後が ( の識別子
     code_lang = 32, // ```swift の "swift"(ブロックの右上に表示する)
+    // --- Obsidian 互換の記法 ---
+    heading4 = 33,
+    heading5 = 34,
+    heading6 = 35,
+    task_marker = 36, // タスク行の "- "(チェックボックスに置き換わるので隠す)
+    task_open = 37, // "[ ]"
+    task_done = 38, // "[x]"
+    highlight_marker = 39, // "==" (隠す)
+    highlight = 40, // ==ここ==
+    tag = 41, // #タグ
+    comment_marker = 42, // "%%" (隠す)
+    comment = 43, // %%ここ%%(Obsidianでは表示されない)
+    footnote = 44, // [^1] と、定義行の [^1]:
+    math_marker = 45, // "$" / "$$" (隠す)
+    math = 46, // $ここ$
+    callout = 47, // > [!note] の [!note] 部分
+    embed_marker = 48, // ![[..]] / ![](..) の "!"
+    escape = 49, // \* の "\"(隠して次の1文字を素通しにする)
+    block_id = 50, // 行末の ^abc123
+    auto_link = 51, // 生の http(s):// URL
+    callout_body = 52, // コールアウトの2行目以降(帯を続けるための目印)
 };
 
 /// Swiftに渡す構造体。UTF-16コードユニット単位。
@@ -90,14 +111,17 @@ fn scanLine(
 
     var body_start: usize = 0;
 
-    // --- 見出し: 行頭の # が1〜3個 + 直後にスペース ---
+    // --- 見出し: 行頭の # が1〜6個 + 直後にスペース ---
     var hashes: usize = 0;
     while (hashes < line.len and line[hashes] == '#') hashes += 1;
-    if (hashes >= 1 and hashes <= 3 and hashes < line.len and line[hashes] == ' ') {
+    if (hashes >= 1 and hashes <= 6 and hashes < line.len and line[hashes] == ' ') {
         const kind: SpanKind = switch (hashes) {
             1 => .heading1,
             2 => .heading2,
-            else => .heading3,
+            3 => .heading3,
+            4 => .heading4,
+            5 => .heading5,
+            else => .heading6,
         };
         // `# ` のスペースまで含めて隠す(隠したときに字下げが残らないように)
         try out.append(gpa, .{ .start = base, .len = hashes + 1, .kind = kind });
@@ -112,31 +136,77 @@ fn scanLine(
             try out.append(gpa, .{ .start = base + after, .len = line.len - after, .kind = .quote_text });
         }
         body_start = after;
+
+        // コールアウト: `> [!note] タイトル` の `[!note]` を1つの目印にする
+        if (calloutEnd(line[after..])) |end| {
+            try out.append(gpa, .{ .start = base + after, .len = end, .kind = .callout });
+            body_start = after + end;
+            if (body_start < line.len and line[body_start] == ' ') body_start += 1;
+        }
     }
 
-    // --- リスト: "- " "* " "+ " "1. "(字下げした入れ子も拾う) ---
+    // --- リスト / タスク: "- " "* " "+ " "1. " "- [ ] "(字下げした入れ子も拾う) ---
     {
         var n = body_start;
         while (n < line.len and (line[n] == ' ' or line[n] == '\t')) n += 1;
         if (n < line.len) {
             const c = line[n];
+            var marker_len: usize = 0;
+            var is_bullet = false;
             if ((c == '-' or c == '*' or c == '+') and n + 1 < line.len and line[n + 1] == ' ') {
-                try out.append(gpa, .{ .start = base + n, .len = 1, .kind = .list_marker });
-                body_start = n + 2;
+                marker_len = 1;
+                is_bullet = true;
             } else if (std.ascii.isDigit(c)) {
                 var d = n;
                 while (d < line.len and std.ascii.isDigit(line[d])) d += 1;
                 if (d < line.len and (line[d] == '.' or line[d] == ')') and
                     d + 1 < line.len and line[d + 1] == ' ')
                 {
-                    try out.append(gpa, .{ .start = base + n, .len = d - n + 1, .kind = .list_marker });
-                    body_start = d + 2;
+                    marker_len = d - n + 1;
                 }
+            }
+
+            if (marker_len > 0) {
+                const after = n + marker_len + 1; // マーカーの直後のスペースまで飛ばす
+                // タスク: "- [ ] " / "- [x] "
+                if (is_bullet and after + 2 < line.len and
+                    line[after] == '[' and line[after + 2] == ']')
+                {
+                    const box = line[after + 1];
+                    const done = box == 'x' or box == 'X';
+                    if (box == ' ' or done) {
+                        // "- " ごと隠す。チェックボックスが目印になるので中黒は要らない。
+                        try out.append(gpa, .{
+                            .start = base + n,
+                            .len = marker_len + 1,
+                            .kind = .task_marker,
+                        });
+                        try out.append(gpa, .{
+                            .start = base + after,
+                            .len = 3,
+                            .kind = if (done) .task_done else .task_open,
+                        });
+                        body_start = after + 3;
+                        if (body_start < line.len and line[body_start] == ' ') body_start += 1;
+                        try scanInline(gpa, base, line, body_start, out);
+                        return;
+                    }
+                }
+                try out.append(gpa, .{ .start = base + n, .len = marker_len, .kind = .list_marker });
+                body_start = after;
             }
         }
     }
 
     try scanInline(gpa, base, line, body_start, out);
+}
+
+/// `[!note]` `[!warning|title]` のような Obsidian のコールアウト指定の長さ
+fn calloutEnd(rest: []const u8) ?usize {
+    if (rest.len < 4 or rest[0] != '[' or rest[1] != '!') return null;
+    const close = std.mem.indexOfScalar(u8, rest, ']') orelse return null;
+    if (close < 3) return null;
+    return close + 1;
 }
 
 /// 行内の記法(コード / 太字 / 斜体 / 打ち消し / リンク)だけを見る。
@@ -150,6 +220,14 @@ fn scanInline(
 ) !void {
     var i: usize = body_start;
     while (i < line.len) {
+        // --- エスケープ: \* \[ など ---
+        // ★ 何よりも先に見る。`\*` を斜体の開きとして拾ってしまわないように。
+        if (line[i] == '\\' and i + 1 < line.len and isEscapable(line[i + 1])) {
+            try out.append(gpa, .{ .start = base + i, .len = 1, .kind = .escape });
+            i += 2; // 次の1文字は記法として解釈しない
+            continue;
+        }
+
         // --- インラインコード: ` ... ` ---
         // ★ 太字・wikilinkより先に見る。`**not bold**` のようにコードの中身は
         //   Markdownとして解釈してはいけないため。
@@ -168,6 +246,73 @@ fn scanInline(
                 continue;
             }
             i += 1; // 閉じが無い → マーカー扱いしない
+            continue;
+        }
+
+        // --- 数式: $$ ... $$ / $ ... $ ---
+        // ★ 記号の塊なので、太字や斜体より先に食べさせる。
+        if (line[i] == '$') {
+            const width: usize = if (i + 1 < line.len and line[i + 1] == '$') 2 else 1;
+            const needle = if (width == 2) "$$" else "$";
+            if (std.mem.indexOfPos(u8, line, i + width, needle)) |close| {
+                if (close > i + width) {
+                    try out.append(gpa, .{ .start = base + i, .len = width, .kind = .math_marker });
+                    try out.append(gpa, .{ .start = base + close, .len = width, .kind = .math_marker });
+                    try out.append(gpa, .{
+                        .start = base + i + width,
+                        .len = close - i - width,
+                        .kind = .math,
+                    });
+                    i = close + width;
+                    continue;
+                }
+            }
+            i += width;
+            continue;
+        }
+
+        // --- コメント: %% ... %%(Obsidianでは表示されない) ---
+        if (i + 1 < line.len and line[i] == '%' and line[i + 1] == '%') {
+            if (std.mem.indexOfPos(u8, line, i + 2, "%%")) |close| {
+                try out.append(gpa, .{ .start = base + i, .len = 2, .kind = .comment_marker });
+                try out.append(gpa, .{ .start = base + close, .len = 2, .kind = .comment_marker });
+                if (close > i + 2) {
+                    try out.append(gpa, .{ .start = base + i + 2, .len = close - i - 2, .kind = .comment });
+                }
+                i = close + 2;
+                continue;
+            }
+            i += 2;
+            continue;
+        }
+
+        // --- ハイライト: == ... == ---
+        if (i + 1 < line.len and line[i] == '=' and line[i + 1] == '=') {
+            if (std.mem.indexOfPos(u8, line, i + 2, "==")) |close| {
+                if (close > i + 2) {
+                    try out.append(gpa, .{ .start = base + i, .len = 2, .kind = .highlight_marker });
+                    try out.append(gpa, .{ .start = base + close, .len = 2, .kind = .highlight_marker });
+                    try out.append(gpa, .{ .start = base + i + 2, .len = close - i - 2, .kind = .highlight });
+                    i = close + 2;
+                    continue;
+                }
+            }
+            i += 2;
+            continue;
+        }
+
+        // --- 太字+斜体: *** ... *** ---
+        // ★ ** より先に見る。後回しにすると `***x***` の閉じ位置がずれる。
+        if (i + 2 < line.len and std.mem.startsWith(u8, line[i..], "***")) {
+            if (std.mem.indexOfPos(u8, line, i + 3, "***")) |close| {
+                try out.append(gpa, .{ .start = base + i, .len = 2, .kind = .bold_marker });
+                try out.append(gpa, .{ .start = base + i + 2, .len = 1, .kind = .italic_marker });
+                try out.append(gpa, .{ .start = base + close, .len = 1, .kind = .italic_marker });
+                try out.append(gpa, .{ .start = base + close + 1, .len = 2, .kind = .bold_marker });
+                i = close + 3;
+                continue;
+            }
+            i += 3;
             continue;
         }
 
@@ -223,6 +368,25 @@ fn scanInline(
             }
             i += 1;
             continue;
+        }
+
+        // --- 埋め込み: ![[ ... ]] / 画像: ![alt](url) ---
+        // ★ `!` だけを別の目印にして、続きは通常の [[ / [ の処理に任せる。
+        if (line[i] == '!' and i + 1 < line.len and line[i + 1] == '[') {
+            try out.append(gpa, .{ .start = base + i, .len = 1, .kind = .embed_marker });
+            i += 1;
+            continue;
+        }
+
+        // --- 脚注: [^1] / 定義行の [^1]: ---
+        if (line[i] == '[' and i + 1 < line.len and line[i + 1] == '^') {
+            if (std.mem.indexOfScalarPos(u8, line, i + 2, ']')) |close| {
+                var end = close + 1;
+                if (end < line.len and line[end] == ':') end += 1; // 定義行
+                try out.append(gpa, .{ .start = base + i, .len = end - i, .kind = .footnote });
+                i = end;
+                continue;
+            }
         }
 
         // --- wikilink: [[ ... ]] ---
@@ -308,8 +472,77 @@ fn scanInline(
             continue;
         }
 
+        // --- タグ: #タグ ---
+        // ★ 行頭の `# ` は見出しとして先に消費されている。ここに来る `#` はタグ候補。
+        if (line[i] == '#' and (i == 0 or line[i - 1] == ' ' or line[i - 1] == '\t' or
+            line[i - 1] == '(' or line[i - 1] == '>'))
+        {
+            var j = i + 1;
+            while (j < line.len and isTagPart(line[j])) j += 1;
+            if (j > i + 1) {
+                try out.append(gpa, .{ .start = base + i, .len = j - i, .kind = .tag });
+                i = j;
+                continue;
+            }
+            i += 1;
+            continue;
+        }
+
+        // --- 生のURL: http:// https:// ---
+        if (line[i] == 'h' and (i == 0 or !isIdentPart(line[i - 1])) and
+            (std.mem.startsWith(u8, line[i..], "http://") or
+                std.mem.startsWith(u8, line[i..], "https://")))
+        {
+            var j = i;
+            while (j < line.len and !isUrlEnd(line[j])) j += 1;
+            // 文末の句読点まで飲み込まない
+            while (j > i and isTrailingPunct(line[j - 1])) j -= 1;
+            try out.append(gpa, .{ .start = base + i, .len = j - i, .kind = .auto_link });
+            i = j;
+            continue;
+        }
+
+        // --- ブロックID: 行末の ^abc123 ---
+        if (line[i] == '^' and i > 0 and line[i - 1] == ' ') {
+            var j = i + 1;
+            while (j < line.len and (std.ascii.isAlphanumeric(line[j]) or line[j] == '-')) j += 1;
+            if (j == line.len and j > i + 1) {
+                try out.append(gpa, .{ .start = base + i, .len = j - i, .kind = .block_id });
+                i = j;
+                continue;
+            }
+            i += 1;
+            continue;
+        }
+
         i += 1;
     }
+}
+
+/// バックスラッシュで打ち消せる記号(Markdownの記法に使うものだけ)
+fn isEscapable(c: u8) bool {
+    return switch (c) {
+        '\\', '`', '*', '_', '{', '}', '[', ']', '(', ')', '#', '+', '-', '.', '!', '|', '~', '=', '$', '%', '^', '<', '>' => true,
+        else => false,
+    };
+}
+
+/// タグに使える文字。日本語タグのためにマルチバイトも通す。
+fn isTagPart(c: u8) bool {
+    return std.ascii.isAlphanumeric(c) or c == '_' or c == '-' or c == '/' or c >= 0x80;
+}
+
+fn isUrlEnd(c: u8) bool {
+    // ★ マルチバイト(0x80以上)で止める。URLに使える文字はASCIIで、
+    //   日本語は普通パーセントエンコードされている。こうしないと
+    //   `https://example.com/a。つづき` のように後ろの文まで飲み込む。
+    if (c >= 0x80) return true;
+    return c == ' ' or c == '\t' or c == '"' or c == '<' or c == '>' or
+        c == ')' or c == ']' or c == '}' or c == '|' or c == '`';
+}
+
+fn isTrailingPunct(c: u8) bool {
+    return c == '.' or c == ',' or c == ';' or c == ':' or c == '!' or c == '?' or c == '\'';
 }
 
 /// 行頭(先頭の空白を除く)が ``` で始まるならフェンス行
@@ -389,6 +622,7 @@ fn scanTableRow(
 fn scanAll(gpa: std.mem.Allocator, text: []const u8, out: *std.ArrayList(ByteSpan)) !void {
     var line_start: usize = 0;
     var in_fence = false;
+    var in_callout = false;
     var lang: syntax.Lang = .{};
     var in_block_comment = false;
     var tokens: std.ArrayList(syntax.Token) = .empty;
@@ -482,7 +716,27 @@ fn scanAll(gpa: std.mem.Allocator, text: []const u8, out: *std.ArrayList(ByteSpa
                     handled = true;
                 }
             }
-            if (!handled) try scanLine(gpa, line_start, line, out);
+            if (!handled) {
+                // コールアウトは `> [!note]` から始まり、`>` が続く間ずっと続く。
+                // 帯を1行で切らないよう、続きの行にも目印を出す。
+                if (in_callout) {
+                    if (line.len > 0 and line[0] == '>') {
+                        // `>` の次から始める。行頭(=quote_marker と同じ位置)にすると
+                        // 並べ替えの順序が決まらず、Swift側で縦棒を消し損ねる。
+                        try out.append(gpa, .{
+                            .start = line_start + 1,
+                            .len = line.len - 1,
+                            .kind = .callout_body,
+                        });
+                    } else {
+                        in_callout = false;
+                    }
+                } else if (line.len > 0 and line[0] == '>') {
+                    const after: usize = if (line.len > 1 and line[1] == ' ') 2 else 1;
+                    if (calloutEnd(line[after..]) != null) in_callout = true;
+                }
+                try scanLine(gpa, line_start, line, out);
+            }
         }
 
         if (line_end == text.len) break;
@@ -558,11 +812,13 @@ test "heading marker span covers hashes and the space" {
     try testing.expectEqual(@intFromEnum(SpanKind.heading2), spans[0].kind);
 }
 
-test "hash without a following space is not a heading" {
+test "hash without a following space is a tag, not a heading" {
     const gpa = testing.allocator;
     const spans = try parse(gpa, "#tag");
     defer gpa.free(spans);
-    try testing.expectEqual(@as(usize, 0), spans.len);
+    try testing.expectEqual(@as(usize, 1), spans.len);
+    try testing.expectEqual(@intFromEnum(SpanKind.tag), spans[0].kind);
+    try testing.expectEqual(@as(u32, 4), spans[0].len);
 }
 
 test "unclosed bold marker is ignored" {
@@ -909,4 +1165,212 @@ test "alias form hides the target and shows the alias" {
     try testing.expectEqual(@as(u32, 4), target.?.len);
     try testing.expectEqual(@as(u32, 7), name.?.start); // "alias"
     try testing.expectEqual(@as(u32, 5), name.?.len);
+}
+
+// --- Obsidian 互換の記法 ---
+
+fn firstOf(spans: []Span, want: SpanKind) ?Span {
+    for (spans) |s| {
+        if (s.kind == @intFromEnum(want)) return s;
+    }
+    return null;
+}
+
+test "headings go all the way to h6" {
+    const gpa = testing.allocator;
+    const spans = try parse(gpa, "#### four\n##### five\n###### six\n####### seven\n");
+    defer gpa.free(spans);
+    try testing.expectEqual(@as(usize, 1), kindsOf(spans, .heading4));
+    try testing.expectEqual(@as(usize, 1), kindsOf(spans, .heading5));
+    try testing.expectEqual(@as(usize, 1), kindsOf(spans, .heading6));
+    // 7個は見出しではない
+    try testing.expectEqual(@as(usize, 0), kindsOf(spans, .heading1));
+}
+
+test "task list marks the checkbox and hides the bullet" {
+    const gpa = testing.allocator;
+    const spans = try parse(gpa, "- [ ] やること\n- [x] おわった\n- ただのリスト\n");
+    defer gpa.free(spans);
+    try testing.expectEqual(@as(usize, 1), kindsOf(spans, .task_open));
+    try testing.expectEqual(@as(usize, 1), kindsOf(spans, .task_done));
+    try testing.expectEqual(@as(usize, 2), kindsOf(spans, .task_marker));
+    // タスクでない行だけが list_marker
+    try testing.expectEqual(@as(usize, 1), kindsOf(spans, .list_marker));
+
+    const box = firstOf(spans, .task_open).?;
+    try testing.expectEqual(@as(u32, 2), box.start); // "- " の直後
+    try testing.expectEqual(@as(u32, 3), box.len); // "[ ]"
+}
+
+test "uppercase X counts as done" {
+    const gpa = testing.allocator;
+    const spans = try parse(gpa, "- [X] おわった\n");
+    defer gpa.free(spans);
+    try testing.expectEqual(@as(usize, 1), kindsOf(spans, .task_done));
+}
+
+test "a bracket that is not a checkbox stays an ordinary list" {
+    const gpa = testing.allocator;
+    const spans = try parse(gpa, "- [z] なにか\n");
+    defer gpa.free(spans);
+    try testing.expectEqual(@as(usize, 0), kindsOf(spans, .task_open));
+    try testing.expectEqual(@as(usize, 0), kindsOf(spans, .task_done));
+    try testing.expectEqual(@as(usize, 1), kindsOf(spans, .list_marker));
+}
+
+test "highlight hides the equals and marks the content" {
+    const gpa = testing.allocator;
+    const spans = try parse(gpa, "これは ==大事== です");
+    defer gpa.free(spans);
+    try testing.expectEqual(@as(usize, 2), kindsOf(spans, .highlight_marker));
+    try testing.expectEqual(@as(usize, 1), kindsOf(spans, .highlight));
+}
+
+test "bold italic uses three asterisks" {
+    const gpa = testing.allocator;
+    const spans = try parse(gpa, "***つよい***");
+    defer gpa.free(spans);
+    try testing.expectEqual(@as(usize, 2), kindsOf(spans, .bold_marker));
+    try testing.expectEqual(@as(usize, 2), kindsOf(spans, .italic_marker));
+}
+
+test "tags are found inline and at the start of a line" {
+    const gpa = testing.allocator;
+    const spans = try parse(gpa, "#設計 のメモ #todo/今日\n");
+    defer gpa.free(spans);
+    try testing.expectEqual(@as(usize, 2), kindsOf(spans, .tag));
+}
+
+test "a lone hash is not a tag" {
+    const gpa = testing.allocator;
+    const spans = try parse(gpa, "a # b");
+    defer gpa.free(spans);
+    try testing.expectEqual(@as(usize, 0), kindsOf(spans, .tag));
+}
+
+test "comments are marked so they can be dimmed" {
+    const gpa = testing.allocator;
+    const spans = try parse(gpa, "本文 %%これは出ない%% 続き");
+    defer gpa.free(spans);
+    try testing.expectEqual(@as(usize, 2), kindsOf(spans, .comment_marker));
+    try testing.expectEqual(@as(usize, 1), kindsOf(spans, .comment));
+}
+
+test "math works inline and as a block" {
+    const gpa = testing.allocator;
+    const spans = try parse(gpa, "$a^2$ と $$E = mc^2$$");
+    defer gpa.free(spans);
+    try testing.expectEqual(@as(usize, 4), kindsOf(spans, .math_marker));
+    try testing.expectEqual(@as(usize, 2), kindsOf(spans, .math));
+}
+
+test "markdown inside math is not parsed" {
+    const gpa = testing.allocator;
+    const spans = try parse(gpa, "$a*b*c$");
+    defer gpa.free(spans);
+    try testing.expectEqual(@as(usize, 0), kindsOf(spans, .italic_marker));
+}
+
+test "callout is picked out of the quote line" {
+    const gpa = testing.allocator;
+    const spans = try parse(gpa, "> [!warning] 注意\n> 本文\n");
+    defer gpa.free(spans);
+    try testing.expectEqual(@as(usize, 1), kindsOf(spans, .callout));
+    const c = firstOf(spans, .callout).?;
+    try testing.expectEqual(@as(u32, 10), c.len); // "[!warning]"
+}
+
+test "footnote reference and definition" {
+    const gpa = testing.allocator;
+    const spans = try parse(gpa, "本文[^1]\n\n[^1]: 注釈\n");
+    defer gpa.free(spans);
+    try testing.expectEqual(@as(usize, 2), kindsOf(spans, .footnote));
+}
+
+test "embed marks the bang and still parses the link" {
+    const gpa = testing.allocator;
+    const spans = try parse(gpa, "![[画像.png]]\n![alt](https://example.com/a.png)\n");
+    defer gpa.free(spans);
+    try testing.expectEqual(@as(usize, 2), kindsOf(spans, .embed_marker));
+    try testing.expectEqual(@as(usize, 1), kindsOf(spans, .wikilink_name));
+    try testing.expectEqual(@as(usize, 1), kindsOf(spans, .link_url));
+}
+
+test "escape stops the next character from being markup" {
+    const gpa = testing.allocator;
+    const spans = try parse(gpa, "\\*星のまま\\*");
+    defer gpa.free(spans);
+    try testing.expectEqual(@as(usize, 2), kindsOf(spans, .escape));
+    try testing.expectEqual(@as(usize, 0), kindsOf(spans, .italic_marker));
+}
+
+test "bare urls are linkified without swallowing the trailing period" {
+    const gpa = testing.allocator;
+    const spans = try parse(gpa, "詳細は https://example.com/a を参照。");
+    defer gpa.free(spans);
+    try testing.expectEqual(@as(usize, 1), kindsOf(spans, .auto_link));
+    const u = firstOf(spans, .auto_link).?;
+    try testing.expectEqual(@as(u32, 21), u.len); // "https://example.com/a"
+}
+
+test "a full-width period right after a url is not part of it" {
+    const gpa = testing.allocator;
+    const spans = try parse(gpa, "https://example.com/a。つづき");
+    defer gpa.free(spans);
+    const u = firstOf(spans, .auto_link).?;
+    try testing.expectEqual(@as(u32, 21), u.len);
+}
+
+test "a url inside a markdown link is not doubled up" {
+    const gpa = testing.allocator;
+    const spans = try parse(gpa, "[ここ](https://example.com)");
+    defer gpa.free(spans);
+    try testing.expectEqual(@as(usize, 1), kindsOf(spans, .link_url));
+    try testing.expectEqual(@as(usize, 0), kindsOf(spans, .auto_link));
+}
+
+test "block id at the end of a line" {
+    const gpa = testing.allocator;
+    const spans = try parse(gpa, "この段落を参照する ^abc123\n");
+    defer gpa.free(spans);
+    try testing.expectEqual(@as(usize, 1), kindsOf(spans, .block_id));
+}
+
+test "a caret in the middle of a line is not a block id" {
+    const gpa = testing.allocator;
+    const spans = try parse(gpa, "a ^b c");
+    defer gpa.free(spans);
+    try testing.expectEqual(@as(usize, 0), kindsOf(spans, .block_id));
+}
+
+test "obsidian syntax is not parsed inside a code fence" {
+    const gpa = testing.allocator;
+    const spans = try parse(gpa,
+        \\```
+        \\- [ ] not a task
+        \\==not highlight==
+        \\#nottag
+        \\```
+        \\
+    );
+    defer gpa.free(spans);
+    try testing.expectEqual(@as(usize, 0), kindsOf(spans, .task_open));
+    try testing.expectEqual(@as(usize, 0), kindsOf(spans, .highlight));
+    try testing.expectEqual(@as(usize, 0), kindsOf(spans, .tag));
+}
+
+test "a callout keeps going while the quote does" {
+    const gpa = testing.allocator;
+    const spans = try parse(gpa,
+        \\> [!note] タイトル
+        \\> 本文1
+        \\> 本文2
+        \\ふつうの段落
+        \\> ただの引用
+        \\
+    );
+    defer gpa.free(spans);
+    try testing.expectEqual(@as(usize, 1), kindsOf(spans, .callout));
+    // 本文2行だけが続き。段落で切れ、その後の引用は巻き込まない。
+    try testing.expectEqual(@as(usize, 2), kindsOf(spans, .callout_body));
 }

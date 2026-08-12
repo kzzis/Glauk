@@ -11,6 +11,14 @@ final class MarkdownLayoutManager: NSLayoutManager {
     var codeCornerRadius: CGFloat = 6
     var inlineCodeCornerRadius: CGFloat = 3
     var tableRuleColor = NSColor.separatorColor
+    var checkboxOnColor = NSColor.controlAccentColor
+    var checkboxOffColor = NSColor.tertiaryLabelColor
+    var checkboxSize: CGFloat = 13
+    var bulletColor = NSColor.secondaryLabelColor
+    var bulletRadius: CGFloat = 2
+    var calloutTint: (String) -> NSColor = { _ in .systemBlue }
+    var tagBgColor = NSColor.systemBlue.withAlphaComponent(0.18)
+    var tagCornerRadius: CGFloat = 4
 
     /// 属性が連続している範囲ごとに、その行たちを囲む矩形を返す
     private func blockRects(for key: NSAttributedString.Key,
@@ -30,6 +38,48 @@ final class MarkdownLayoutManager: NSLayoutManager {
             }
         }
         return result
+    }
+
+    /// 文字にぴったり沿った矩形を返す。
+    /// ★ blockRects は行フラグメント(=行まるごと)を返すので、行内の一部を
+    ///   囲みたいものに使ってはいけない。タグの下地が行全体に広がる。
+    private func inlineRects(for key: NSAttributedString.Key,
+                             in charRange: NSRange,
+                             origin: NSPoint,
+                             container: NSTextContainer) -> [NSRect] {
+        guard let storage = textStorage else { return [] }
+        var result: [NSRect] = []
+        storage.enumerateAttribute(key, in: charRange) { value, range, _ in
+            guard value != nil, range.length > 0 else { return }
+            let glyphs = glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+            enumerateEnclosingRects(forGlyphRange: glyphs,
+                                    withinSelectedGlyphRange: NSRange(location: NSNotFound, length: 0),
+                                    in: container) { rect, _ in
+                result.append(rect.offsetBy(dx: origin.x, dy: origin.y))
+            }
+        }
+        return result
+    }
+
+    /// 目印を付けた文字の「見た目の中心」を返す。
+    /// ★ 行フラグメントの中心では駄目。lineHeightMultiple で行が伸びているぶん
+    ///   文字より上にずれ、中黒やチェックボックスが宙に浮く。
+    ///   ベースラインを基準にして、そこから文字の高さの分だけ持ち上げる。
+    private func markerCenter(for range: NSRange,
+                              in container: NSTextContainer,
+                              origin: NSPoint) -> NSPoint? {
+        let glyphs = glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+        guard glyphs.length > 0 else { return nil }
+        let rect = boundingRect(forGlyphRange: glyphs, in: container)
+        guard rect.width > 0 else { return nil }
+
+        let fragment = lineFragmentRect(forGlyphAt: glyphs.location, effectiveRange: nil)
+        let offset = location(forGlyphAt: glyphs.location)      // フラグメント内のベースライン
+        let baseline = fragment.minY + offset.y
+        let font = (textStorage?.attribute(.font, at: range.location, effectiveRange: nil)
+            as? NSFont) ?? NSFont.systemFont(ofSize: 15)
+        return NSPoint(x: origin.x + rect.midX,
+                       y: origin.y + baseline - font.xHeight / 2)
     }
 
     /// 文字では表せない装飾(引用の縦棒・区切り線)をここで描く。
@@ -65,9 +115,16 @@ final class MarkdownLayoutManager: NSLayoutManager {
             }
         }
 
+        // --- タグ: 文字に沿った角丸の下地 ---
+        for rect in inlineRects(for: .glaukTag, in: charRange, origin: origin, container: container) {
+            let box = rect.insetBy(dx: -3, dy: 2)
+            tagBgColor.setFill()
+            NSBezierPath(roundedRect: box, xRadius: tagCornerRadius, yRadius: tagCornerRadius).fill()
+        }
+
         // --- インラインコード: 文字に沿った小さな角丸 ---
-        for (_, rect) in blockRects(for: .glaukInlineCode, in: charRange, origin: origin) {
-            let box = rect.insetBy(dx: -1, dy: 1)
+        for rect in inlineRects(for: .glaukInlineCode, in: charRange, origin: origin, container: container) {
+            let box = rect.insetBy(dx: -1, dy: 2)
             codeBgColor.setFill()
             NSBezierPath(roundedRect: box,
                          xRadius: inlineCodeCornerRadius,
@@ -107,10 +164,69 @@ final class MarkdownLayoutManager: NSLayoutManager {
             bar.fill()
         }
 
+        // --- コールアウト: 帯を敷いて左に色の縦棒 ---
+        for (range, rect) in blockRects(for: .glaukCallout, in: charRange, origin: origin) {
+            var type = "note"
+            storage.enumerateAttribute(.glaukCallout, in: range) { value, _, stop in
+                if let t = value as? String { type = t; stop.pointee = true }
+            }
+            let tint = calloutTint(type)
+            let box = NSRect(x: origin.x + container.lineFragmentPadding, y: rect.minY,
+                             width: fullWidth, height: rect.height)
+            tint.withAlphaComponent(0.10).setFill()
+            NSBezierPath(roundedRect: box, xRadius: 4, yRadius: 4).fill()
+            tint.setFill()
+            NSRect(x: box.minX, y: box.minY, width: 3, height: box.height).fill()
+        }
+
+        // --- リストの中黒: 透明にした `-` の位置に描く ---
+        storage.enumerateAttribute(.glaukBullet, in: charRange) { value, range, _ in
+            guard value != nil else { return }
+            guard let center = self.markerCenter(for: range, in: container, origin: origin) else { return }
+            let r = self.bulletRadius
+            let dot = NSRect(x: center.x - r, y: center.y - r, width: r * 2, height: r * 2)
+            self.bulletColor.setFill()
+            NSBezierPath(ovalIn: dot).fill()
+        }
+
+        // --- チェックボックス: 透明にした `[ ]` の位置に描く ---
+        storage.enumerateAttribute(.glaukCheckbox, in: charRange) { value, range, _ in
+            guard let done = value as? Bool else { return }
+            guard let center = self.markerCenter(for: range, in: container, origin: origin) else { return }
+            let side = self.checkboxSize
+            let box = NSRect(x: (center.x - side / 2).rounded(),
+                             y: (center.y - side / 2).rounded(),
+                             width: side, height: side)
+            let path = NSBezierPath(roundedRect: box, xRadius: 3, yRadius: 3)
+            if done {
+                self.checkboxOnColor.setFill()
+                path.fill()
+                // ★ テキストの座標系は y が下向き。上向きの座標で組むと鉤が逆さになる。
+                let tick = NSBezierPath()
+                tick.move(to: NSPoint(x: box.minX + side * 0.24, y: box.midY))
+                tick.line(to: NSPoint(x: box.minX + side * 0.43, y: box.maxY - side * 0.26))
+                tick.line(to: NSPoint(x: box.minX + side * 0.78, y: box.minY + side * 0.26))
+                tick.lineWidth = 2
+                tick.lineCapStyle = .round
+                tick.lineJoinStyle = .round
+                NSColor.white.setStroke()
+                tick.stroke()
+            } else {
+                self.checkboxOffColor.setStroke()
+                path.lineWidth = 1.5
+                path.stroke()
+            }
+        }
+
         storage.enumerateAttribute(.glaukQuote, in: charRange) { value, range, _ in
             guard value != nil else { return }
             let glyphs = glyphRange(forCharacterRange: range, actualCharacterRange: nil)
-            enumerateLineFragments(forGlyphRange: glyphs) { rect, _, _, _, _ in
+            enumerateLineFragments(forGlyphRange: glyphs) { rect, _, _, glyphRange, _ in
+                // ★ 隠した `> ` は幅が0なので、直前の空行のフラグメントに吸い込まれる。
+                //   実測: 空行の "\n" と "> " が同じフラグメントに入り、空行に縦棒が1本余分に出る。
+                //   引用の始まりより前から始まるフラグメントは描かない。
+                let chars = self.characterRange(forGlyphRange: glyphRange, actualGlyphRange: nil)
+                guard chars.location >= range.location else { return }
                 let bar = NSRect(x: origin.x + rect.minX + 4,
                                  y: origin.y + rect.minY + 2,
                                  width: self.quoteBarWidth,

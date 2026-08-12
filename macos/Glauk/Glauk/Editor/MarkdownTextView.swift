@@ -31,6 +31,14 @@ struct MarkdownTextView: NSViewRepresentable {
         layoutManager.quoteBarColor = typography.quoteBar
         layoutManager.quoteBarWidth = typography.quoteBarWidth
         layoutManager.tableRuleColor = typography.tableRule
+        layoutManager.checkboxOnColor = typography.checkboxOn
+        layoutManager.checkboxOffColor = typography.checkboxOff
+        layoutManager.checkboxSize = typography.checkboxSize
+        layoutManager.bulletColor = typography.bulletColor
+        layoutManager.bulletRadius = typography.bulletRadius
+        layoutManager.calloutTint = typography.calloutTint
+        layoutManager.tagBgColor = typography.tagBg
+        layoutManager.tagCornerRadius = typography.tagCornerRadius
         let storage = NSTextStorage()
         storage.delegate = context.coordinator
         storage.addLayoutManager(layoutManager)

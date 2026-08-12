@@ -21,8 +21,8 @@ struct EditorTypography {
     var body = NSFont(name: "IBMPlexMono", size: 15)
         ?? NSFont.monospacedSystemFont(ofSize: 15, weight: .regular)
     var heading: (Int) -> NSFont = { level in
-        let sizes: [CGFloat] = [28, 22, 18]
-        return NSFont.systemFont(ofSize: sizes[min(level, 3) - 1], weight: .bold)
+        let sizes: [CGFloat] = [28, 22, 18, 16, 15, 15]
+        return NSFont.systemFont(ofSize: sizes[min(max(level, 1), 6) - 1], weight: .bold)
     }
     /// システム等幅フォントに対しては、NSFontManager の変換もディスクリプタの .bold も
     /// **Semibold(weight 0.30)** しか返さず「太くなっていない」ように見える。
@@ -83,13 +83,17 @@ struct EditorTypography {
         p.headIndent = 16
         return p
     }()
-    /// リストは折り返した2行目以降がマーカーの右に揃うようにする
-    var listParagraph: NSParagraphStyle = {
+    /// リストは折り返した2行目以降がマーカーの右に揃うようにする。
+    /// `level` は字下げの段数(入れ子の深さ)。Obsidian と同じく段ごとに下げる。
+    var listParagraph: (Int) -> NSParagraphStyle = { level in
+        let step: CGFloat = 20
+        let base = step * CGFloat(level)
         let p = NSMutableParagraphStyle()
         p.lineHeightMultiple = 1.55
-        p.headIndent = 20
+        p.firstLineHeadIndent = base
+        p.headIndent = base + step
         return p
-    }()
+    }
     /// コードブロック / テーブルは角丸の内側に余白を作り、行間も詰める
     var codeParagraph: NSParagraphStyle = {
         let p = NSMutableParagraphStyle()
@@ -107,6 +111,42 @@ struct EditorTypography {
     var tableRule = NSColor.separatorColor
     /// glauk-design-doc.md の CodeBg(Light #EFEDE8 / Dark #26262A)
     var codeBg = dynamicColor(dark: 0x26262A, light: 0xEFEDE8)
+
+    // --- Obsidian 互換の記法 ---
+    /// ==ハイライト== の下地。蛍光ペン風に薄く敷く
+    var highlightBg = dynamicColor(dark: 0x5C4B00, light: 0xFFF3A3)
+    /// #タグ。角丸の下地に少し濃い文字
+    var tagText = dynamicColor(dark: 0x9BD1FF, light: 0x0A5BA8)
+    var tagBg = dynamicColor(dark: 0x1E3A5F, light: 0xDCEBFB)
+    var tagCornerRadius: CGFloat = 4
+    /// %%コメント%% は「出ない」ものなので、あることだけ分かる程度に薄くする
+    var commentText = NSColor.tertiaryLabelColor
+    /// $数式$ は等幅寄りにして本文と区別する
+    var math = NSFont(name: "IBMPlexMono", size: 15)
+        ?? NSFont.monospacedSystemFont(ofSize: 15, weight: .regular)
+    var mathText = dynamicColor(dark: 0xC3A6FF, light: 0x6B21A8)
+    /// 脚注 [^1] とブロックID ^abc は小さく薄く
+    var superscript = NSFont.systemFont(ofSize: 10)
+    /// チェックボックス
+    var checkboxSize: CGFloat = 13
+    var checkboxOn = NSColor.controlAccentColor
+    var checkboxOff = NSColor.tertiaryLabelColor
+    /// 中黒(リストの `-` の代わりに描く)
+    var bulletColor = NSColor.secondaryLabelColor
+    var bulletRadius: CGFloat = 2
+
+    /// コールアウトの色。Obsidian の種類名に合わせる
+    var calloutTint: (String) -> NSColor = { type in
+        switch type.lowercased() {
+        case "warning", "caution", "attention": return .systemOrange
+        case "danger", "error", "bug", "failure", "fail", "missing": return .systemRed
+        case "success", "check", "done", "tip", "hint", "important": return .systemGreen
+        case "question", "help", "faq": return .systemPurple
+        case "example": return .systemPink
+        case "quote", "cite": return .systemGray
+        default: return .systemBlue      // note / info / todo / abstract …
+        }
+    }
 }
 
 final class SyntaxHighlighter {
@@ -155,6 +195,9 @@ final class SyntaxHighlighter {
         storage.removeAttribute(.obliqueness, range: scope)
         storage.removeAttribute(.strikethroughStyle, range: scope)
         storage.removeAttribute(.kern, range: scope)   // テーブルの桁揃えをやり直すため
+        storage.removeAttribute(.glaukCheckbox, range: scope)
+        storage.removeAttribute(.glaukBullet, range: scope)
+        storage.removeAttribute(.glaukCallout, range: scope)
         storage.addAttribute(.paragraphStyle, value: typography.bodyParagraph, range: scope)
 
         // ★ Obsidian と同じ考え方: カーソルがテーブルの中にある間は原文のまま見せ、
@@ -173,6 +216,8 @@ final class SyntaxHighlighter {
         // wikilink_target は wikilink_name より必ず先に来る(開始位置ソート済みのため)。
         // 直前に見た target 名を覚えておけば、続く name の存在判定に使える。
         var currentTargetName: String?
+        // コールアウトの続きの行は種類を持っていないので、直前の見出し行のものを引き継ぐ
+        var lastCalloutType = "note"
 
         for span in spans {
             guard NSMaxRange(span.range) <= storage.length else { continue }
@@ -180,8 +225,11 @@ final class SyntaxHighlighter {
                 ?? false
 
             switch span.kind {
-            case .heading1, .heading2, .heading3:
-                let level = Int(span.kind.rawValue)
+            case .heading1, .heading2, .heading3, .heading4, .heading5, .heading6:
+                // heading4 以降は rawValue が飛んでいるので、連番に直す
+                let level = span.kind.rawValue <= 3
+                    ? Int(span.kind.rawValue)
+                    : Int(span.kind.rawValue) - 29
                 let lineRange = (storage.string as NSString).lineRange(for: span.range)
                 storage.addAttribute(.font, value: typography.heading(level), range: lineRange)
                 if !onCursorLine { storage.addAttribute(.glaukHidden, value: true, range: span.range) }
@@ -232,9 +280,114 @@ final class SyntaxHighlighter {
                 if !onCursorLine { storage.addAttribute(.glaukHidden, value: true, range: span.range) }
 
             case .listMarker:
-                storage.addAttribute(.foregroundColor, value: typography.accent, range: span.range)
                 let lineRange = (storage.string as NSString).lineRange(for: span.range)
-                storage.addAttribute(.paragraphStyle, value: typography.listParagraph, range: lineRange)
+                storage.addAttribute(.paragraphStyle,
+                                     value: typography.listParagraph(indentOf(span, in: ns)),
+                                     range: lineRange)
+                // ★ `-` は隠さず透明にする。隠すと幅が0になり、中黒を描く場所が無くなる。
+                //   (テーブルの縦罫線と同じ手)
+                if onCursorLine {
+                    storage.addAttribute(.foregroundColor, value: typography.accent, range: span.range)
+                } else if span.range.length == 1 {
+                    storage.addAttribute(.foregroundColor, value: NSColor.clear, range: span.range)
+                    storage.addAttribute(.glaukBullet, value: true, range: span.range)
+                } else {
+                    // "1." のような番号付きはそのまま見せる
+                    storage.addAttribute(.foregroundColor, value: typography.accent, range: span.range)
+                }
+
+            case .taskMarker:
+                let lineRange = (storage.string as NSString).lineRange(for: span.range)
+                storage.addAttribute(.paragraphStyle,
+                                     value: typography.listParagraph(indentOf(span, in: ns)),
+                                     range: lineRange)
+                if !onCursorLine { storage.addAttribute(.glaukHidden, value: true, range: span.range) }
+
+            case .taskOpen, .taskDone:
+                let done = span.kind == .taskDone
+                if onCursorLine {
+                    storage.addAttribute(.foregroundColor, value: typography.muted, range: span.range)
+                } else {
+                    // 透明にして、その上に MarkdownLayoutManager が四角と鉤を描く
+                    storage.addAttribute(.foregroundColor, value: NSColor.clear, range: span.range)
+                    storage.addAttribute(.glaukCheckbox, value: done, range: span.range)
+                }
+                if done {
+                    // 済んだタスクは行の残りを薄く+打ち消す
+                    let lineRange = (storage.string as NSString).lineRange(for: span.range)
+                    let restStart = NSMaxRange(span.range)
+                    let rest = NSRange(location: restStart,
+                                       length: max(0, NSMaxRange(lineRange) - restStart))
+                    if rest.length > 0 {
+                        storage.addAttribute(.foregroundColor, value: typography.muted, range: rest)
+                        storage.addAttribute(.strikethroughStyle,
+                                             value: NSUnderlineStyle.single.rawValue, range: rest)
+                    }
+                }
+
+            case .highlightMarker:
+                if !onCursorLine { storage.addAttribute(.glaukHidden, value: true, range: span.range) }
+
+            case .highlight:
+                storage.addAttribute(.backgroundColor, value: typography.highlightBg, range: span.range)
+
+            case .tag:
+                storage.addAttribute(.foregroundColor, value: typography.tagText, range: span.range)
+                // 下地は MarkdownLayoutManager が角丸で描く(.backgroundColor は角が立つ)
+                storage.addAttribute(.glaukTag, value: true, range: span.range)
+
+            case .commentMarker:
+                if !onCursorLine { storage.addAttribute(.glaukHidden, value: true, range: span.range) }
+
+            case .comment:
+                // Obsidian では表示されない。消しはしないが、本文と区別できるまで落とす。
+                storage.addAttribute(.foregroundColor, value: typography.commentText, range: span.range)
+
+            case .mathMarker:
+                if !onCursorLine { storage.addAttribute(.glaukHidden, value: true, range: span.range) }
+
+            case .math:
+                storage.addAttribute(.font, value: typography.math, range: span.range)
+                storage.addAttribute(.foregroundColor, value: typography.mathText, range: span.range)
+
+            case .footnote, .blockID:
+                storage.addAttribute(.font, value: typography.superscript, range: span.range)
+                storage.addAttribute(.foregroundColor, value: typography.muted, range: span.range)
+
+            case .callout:
+                let type = calloutType(ns.substring(with: span.range))
+                lastCalloutType = type
+                let lineRange = ns.lineRange(for: span.range)
+                storage.addAttribute(.glaukCallout, value: type, range: lineRange)
+                // ★ 帯を描くので引用の縦棒は消す。両方出ると棒が2本並ぶ。
+                storage.removeAttribute(.glaukQuote, range: lineRange)
+                // タイトルは色付きの太字にする
+                let titleStart = min(NSMaxRange(span.range) + 1, NSMaxRange(lineRange))
+                let title = NSRange(location: titleStart,
+                                    length: max(0, NSMaxRange(lineRange) - titleStart))
+                if title.length > 0 {
+                    let base = (storage.attribute(.font, at: title.location,
+                                                  effectiveRange: nil) as? NSFont) ?? typography.body
+                    storage.addAttribute(.font, value: typography.bold(base), range: title)
+                    storage.addAttribute(.foregroundColor,
+                                         value: typography.calloutTint(type), range: title)
+                }
+                if !onCursorLine { storage.addAttribute(.glaukHidden, value: true, range: span.range) }
+
+            case .calloutBody:
+                let lineRange = ns.lineRange(for: span.range)
+                storage.addAttribute(.glaukCallout, value: lastCalloutType, range: lineRange)
+                storage.removeAttribute(.glaukQuote, range: lineRange)
+
+            case .embedMarker, .escape:
+                if !onCursorLine { storage.addAttribute(.glaukHidden, value: true, range: span.range) }
+
+            case .autoLink:
+                storage.addAttribute(.foregroundColor, value: typography.accent, range: span.range)
+                storage.addAttribute(.underlineStyle,
+                                     value: NSUnderlineStyle.single.rawValue, range: span.range)
+                storage.addAttribute(.glaukLinkURL,
+                                     value: ns.substring(with: span.range), range: span.range)
 
             case .quoteMarker:
                 let lineRange = (storage.string as NSString).lineRange(for: span.range)
@@ -466,6 +619,33 @@ final class SyntaxHighlighter {
     /// 実際の組版と同じ幅を測る。
     /// NSAttributedString.size() はレイアウトマネージャの結果と数pt ずれるため、
     /// 桁揃えに使うと `|` の位置が揃いきらない(実測で最大5ptずれた)。
+    /// リストマーカーの手前にある空白から入れ子の深さを出す。
+    /// タブは1段、スペースは2つで1段(Obsidian の既定に近い)。
+    private func indentOf(_ span: Span, in ns: NSString) -> Int {
+        let lineRange = ns.lineRange(for: span.range)
+        var spaces = 0
+        var tabs = 0
+        var i = lineRange.location
+        while i < span.range.location {
+            switch ns.character(at: i) {
+            case 0x20: spaces += 1
+            case 0x09: tabs += 1
+            default: return tabs + spaces / 2   // 引用の "> " など、空白以外が来たら打ち切り
+            }
+            i += 1
+        }
+        return tabs + spaces / 2
+    }
+
+    /// `[!warning]` / `[!warning|タイトル]` → "warning"
+    private func calloutType(_ raw: String) -> String {
+        var s = raw
+        if s.hasPrefix("[!") { s.removeFirst(2) }
+        if s.hasSuffix("]") { s.removeLast() }
+        if let bar = s.firstIndex(of: "|") { s = String(s[s.startIndex..<bar]) }
+        return s.trimmingCharacters(in: .whitespaces)
+    }
+
     private func typesetWidth(_ attributed: NSAttributedString) -> CGFloat {
         guard attributed.length > 0 else { return 0 }
         let line = CTLineCreateWithAttributedString(attributed)
