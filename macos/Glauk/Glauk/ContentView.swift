@@ -2,7 +2,8 @@
 import SwiftUI
 
 struct ContentView: View {
-    @StateObject private var noteIndex = NoteIndex()
+    @EnvironmentObject var noteIndex: NoteIndex
+    @EnvironmentObject var notesFolder: NotesFolder
     @StateObject private var document = DocumentStore()
 
     var body: some View {
@@ -26,9 +27,22 @@ struct ContentView: View {
             }
             .padding(8)
 
-            MarkdownTextView(text: $document.text, noteIndex: noteIndex, loadRevision: document.revision)
+            MarkdownTextView(text: $document.text,
+                             noteIndex: noteIndex,
+                             loadRevision: document.revision,
+                             indexRevision: noteIndex.revision)
         }
         .frame(minWidth: 900, minHeight: 700)
-        .onAppear { noteIndex.loadMock() }
+        // 起動時
+        .task { await noteIndex.refresh(root: notesFolder.root) }
+        // 設定を変えたとき
+        .onChange(of: notesFolder.root) { _, newRoot in
+            Task { await noteIndex.refresh(root: newRoot) }
+        }
+        // Obsidian 側でノートを増やして戻ってきたときに反映する
+        .onReceive(NotificationCenter.default.publisher(
+            for: NSApplication.didBecomeActiveNotification)) { _ in
+            Task { await noteIndex.refresh(root: notesFolder.root) }
+        }
     }
 }
