@@ -3,6 +3,7 @@ import AppKit
 
 protocol EditorTextViewDelegate: AnyObject {
     func editorTextView(_ tv: NSTextView, didClickWikilink name: String)
+    func editorTextView(_ tv: NSTextView, didClickURL url: String)
 }
 
 final class EditorTextView: NSTextView {
@@ -14,13 +15,22 @@ final class EditorTextView: NSTextView {
         }
         let point = convert(event.locationInWindow, from: nil)
         let index = characterIndexForInsertion(at: point)
-        guard index >= 0, index < storage.length,
-              let name = storage.attribute(.glaukLinkTarget, at: index,
-                                           effectiveRange: nil) as? String
-        else {
-            super.mouseDown(with: event); return      // ← リンク以外は通常動作
+        guard index >= 0, index < storage.length else {
+            super.mouseDown(with: event); return
         }
-        linkDelegate?.editorTextView(self, didClickWikilink: name)
+
+        if let name = storage.attribute(.glaukLinkTarget, at: index,
+                                        effectiveRange: nil) as? String {
+            linkDelegate?.editorTextView(self, didClickWikilink: name)
+            return
+        }
+        // `[text](url)` は外のブラウザへ。ノートを開く経路とは分ける。
+        if let url = storage.attribute(.glaukLinkURL, at: index,
+                                       effectiveRange: nil) as? String {
+            linkDelegate?.editorTextView(self, didClickURL: url)
+            return
+        }
+        super.mouseDown(with: event)      // ← リンク以外は通常動作
     }
 
     /// リンクの上でカーソルを指差しに変える
@@ -29,19 +39,21 @@ final class EditorTextView: NSTextView {
         guard let storage = textStorage, let lm = layoutManager,
               let tc = textContainer else { return }
 
-        storage.enumerateAttribute(.glaukLinkTarget,
-                                   in: NSRange(location: 0, length: storage.length)) { value, range, _ in
-            guard value != nil else { return }
-            let glyphRange = lm.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
-            lm.enumerateEnclosingRects(
-                forGlyphRange: glyphRange,
-                withinSelectedGlyphRange: NSRange(location: NSNotFound, length: 0),
-                in: tc
-            ) { rect, _ in
-                var r = rect
-                r.origin.x += self.textContainerInset.width
-                r.origin.y += self.textContainerInset.height
-                self.addCursorRect(r, cursor: .pointingHand)
+        let whole = NSRange(location: 0, length: storage.length)
+        for key in [NSAttributedString.Key.glaukLinkTarget, .glaukLinkURL] {
+            storage.enumerateAttribute(key, in: whole) { value, range, _ in
+                guard value != nil else { return }
+                let glyphRange = lm.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+                lm.enumerateEnclosingRects(
+                    forGlyphRange: glyphRange,
+                    withinSelectedGlyphRange: NSRange(location: NSNotFound, length: 0),
+                    in: tc
+                ) { rect, _ in
+                    var r = rect
+                    r.origin.x += self.textContainerInset.width
+                    r.origin.y += self.textContainerInset.height
+                    self.addCursorRect(r, cursor: .pointingHand)
+                }
             }
         }
     }

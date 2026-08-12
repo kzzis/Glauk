@@ -8,6 +8,11 @@ struct MarkdownTextView: NSViewRepresentable {
     /// ファイルを開くたびに増える値。これが変わったら、テキストビューが
     /// firstResponder中でも強制的に中身を差し替える(Step 4のファイル読み込み用)。
     var loadRevision = 0
+    /// 索引が変わるたびに増える値。これが変わったら `[[リンク]]` の色だけ塗り直す
+    /// (走査は非同期なので、初回表示のときは索引がまだ空のことがある)。
+    var indexRevision = 0
+    /// `[[リンク]]` がクリックされた。名前(`|`や`#`を落としたもの)が渡る。
+    var onOpenNote: (String) -> Void = { _ in }
     var typewriterScroll: Bool = true
 
     func makeCoordinator() -> Coordinator {
@@ -26,6 +31,14 @@ struct MarkdownTextView: NSViewRepresentable {
         layoutManager.quoteBarColor = typography.quoteBar
         layoutManager.quoteBarWidth = typography.quoteBarWidth
         layoutManager.tableRuleColor = typography.tableRule
+        layoutManager.checkboxOnColor = typography.checkboxOn
+        layoutManager.checkboxOffColor = typography.checkboxOff
+        layoutManager.checkboxSize = typography.checkboxSize
+        layoutManager.bulletColor = typography.bulletColor
+        layoutManager.bulletRadius = typography.bulletRadius
+        layoutManager.calloutTint = typography.calloutTint
+        layoutManager.tagBgColor = typography.tagBg
+        layoutManager.tagCornerRadius = typography.tagCornerRadius
         let storage = NSTextStorage()
         storage.delegate = context.coordinator
         storage.addLayoutManager(layoutManager)
@@ -72,6 +85,7 @@ struct MarkdownTextView: NSViewRepresentable {
         context.coordinator.textView = textView
         context.coordinator.textStorage = storage   // ★ NSTextStorageの所有者がここしか無いので強参照で保持する
         context.coordinator.lastLoadRevision = loadRevision
+        context.coordinator.lastIndexRevision = indexRevision
         context.coordinator.highlighter.apply(to: storage, cursorLine: nil)
 
         let scrollView = NSScrollView()
@@ -84,10 +98,26 @@ struct MarkdownTextView: NSViewRepresentable {
     // SwiftUI側の状態が変わるたびに呼ばれる
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         guard let textView = scrollView.documentView as? NSTextView else { return }
+        // ★ 下の guard で早期 return する経路が多いので、必ず先に更新する。
+        //   ここを後ろに置くと、リンクをクリックしても古い(何もしない)閉包が呼ばれる。
+        context.coordinator.onOpenNote = onOpenNote
         // ★ 変換中(marked text)は絶対に触らない。
         //   下の `textView.string = text` はテキストビューを丸ごと置き換えるので、
         //   変換中に SwiftUI の再描画が挟まると未確定の文字列ごと消える。
         guard !textView.hasMarkedText() else { return }
+
+        // ★ Step 5a: 走査が終わって索引が入れ替わったら、本文はそのままで塗り直す。
+        //   これが無いと、起動直後に開いていた文書の `[[リンク]]` が
+        //   「未作成」の見た目のまま(走査前の判定のまま)固まってしまう。
+        if context.coordinator.lastIndexRevision != indexRevision {
+            context.coordinator.lastIndexRevision = indexRevision
+            if let storage = textView.textStorage {
+                let ns = textView.string as NSString
+                let selection = textView.selectedRange().clamped(to: ns.length)
+                context.coordinator.highlighter.apply(to: storage,
+                                                      cursorLine: ns.lineRange(for: selection))
+            }
+        }
 
         // ★ Step 4: ファイルを開いた直後は loadRevision が変わる。これは
         //   「テキストビューの中身を丸ごと差し替える」意図が明確な操作なので、
@@ -126,6 +156,8 @@ struct MarkdownTextView: NSViewRepresentable {
         weak var textView: NSTextView?
         var textStorage: NSTextStorage?   // NSTextView/NSTextContainerはlayoutManagerを弱参照するため、これが無いと解放されて編集不能になる
         var lastLoadRevision: Int?
+        var lastIndexRevision = 0
+        var onOpenNote: (String) -> Void = { _ in }
         private var lastCursorLine: NSRange?
         private var pendingEditedRange: NSRange?
         private var highlightScheduled = false
@@ -135,7 +167,7 @@ struct MarkdownTextView: NSViewRepresentable {
             super.init()
             highlighter.noteExists = { [weak noteIndex = parent.noteIndex] name in
                 // NSTextStorageDelegate/NSTextViewDelegate の呼び出しは常にメインスレッドなので安全
-                MainActor.assumeIsolated { noteIndex?.exists(name) ?? false }
+                MainActor.assumeIsolated { noteIndex?.looksResolvable(name) ?? true }
             }
         }
 
@@ -294,17 +326,20 @@ struct MarkdownTextView: NSViewRepresentable {
             lastCursorLine = cursorLine
         }
 
-        /// リンクをクリックしたときに呼ばれる。実際にノートを開く処理は Step 5b で差し替える
+        /// `[[リンク]]` をクリックした。開くかどうかの判断は ContentView に任せる
+        /// (未作成なら作成の確認を出す、履歴に積む、といった判断はここの仕事ではない)。
         func editorTextView(_ tv: NSTextView, didClickWikilink name: String) {
             // mouseDown からの呼び出しなので常にメインスレッド
-            MainActor.assumeIsolated {
-                if parent.noteIndex.exists(name) {
-                    print("[link] open: \(name) → \(parent.noteIndex.path(for: name) ?? "?")")
-                } else {
-                    print("[link] not found: \(name)")
-                    NSSound.beep()
-                }
+            MainActor.assumeIsolated { onOpenNote(name) }
+        }
+
+        /// `[text](url)` をクリックした。外のブラウザに渡す。
+        func editorTextView(_ tv: NSTextView, didClickURL url: String) {
+            guard let parsed = URL(string: url), parsed.scheme != nil else {
+                NSSound.beep()      // 相対パスなど、いまは開けないもの
+                return
             }
+            NSWorkspace.shared.open(parsed)
         }
 
         private func scrollCurrentLineToCenter(_ textView: NSTextView) {

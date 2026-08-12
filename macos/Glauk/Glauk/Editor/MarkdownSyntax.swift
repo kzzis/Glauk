@@ -18,6 +18,19 @@ enum SpanKind: UInt8 {
     case codeKeyword = 22, codeString = 23, codeNumber = 24, codeComment = 25
     case tableHeader = 26, tableRow = 27, tableDelimiter = 28, tablePipe = 29
     case codeType = 30, codeFunction = 31, codeLang = 32
+    case heading4 = 33, heading5 = 34, heading6 = 35
+    case taskMarker = 36, taskOpen = 37, taskDone = 38
+    case highlightMarker = 39, highlight = 40
+    case tag = 41
+    case commentMarker = 42, comment = 43
+    case footnote = 44
+    case mathMarker = 45, math = 46
+    case callout = 47
+    case embedMarker = 48
+    case escape = 49
+    case blockID = 50
+    case autoLink = 51
+    case calloutBody = 52
 }
 
 struct Span {
@@ -46,6 +59,14 @@ extension NSAttributedString.Key {
     static let glaukCodeLang = NSAttributedString.Key("glauk.codeLang")
     /// テーブルの縦罫線を描く位置(`|` の文字に付ける)
     static let glaukTablePipe = NSAttributedString.Key("glauk.tablePipe")
+    /// チェックボックスを描く位置。値は完了なら true(`[x]` の3文字に付ける)
+    static let glaukCheckbox = NSAttributedString.Key("glauk.checkbox")
+    /// 中黒を描く位置(リストの `-` に付ける)
+    static let glaukBullet = NSAttributedString.Key("glauk.bullet")
+    /// コールアウトの帯を描く範囲。値は種類の文字列("note" など)
+    static let glaukCallout = NSAttributedString.Key("glauk.callout")
+    /// #タグ の角丸の下地を描く範囲
+    static let glaukTag = NSAttributedString.Key("glauk.tag")
 }
 
 enum MarkdownParser {
