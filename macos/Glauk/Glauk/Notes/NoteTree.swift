@@ -54,4 +54,45 @@ enum NoteTree {
 
         return folders + notes
     }
+
+    /// 画面に出す1行分。`depth` が字下げの段数。
+    struct Row: Identifiable, Equatable {
+        let node: NoteNode
+        let depth: Int
+        var id: String { node.id }
+    }
+
+    /// 開いているフォルダの中身だけを平らに並べる
+    nonisolated static func rows(_ nodes: [NoteNode],
+                                 expanded: Set<String>,
+                                 depth: Int = 0) -> [Row] {
+        var out: [Row] = []
+        for node in nodes {
+            out.append(Row(node: node, depth: depth))
+            if node.isFolder, expanded.contains(node.id), let children = node.children {
+                out.append(contentsOf: rows(children, expanded: expanded, depth: depth + 1))
+            }
+        }
+        return out
+    }
+
+    /// `a/b/c.md` → ["a", "a/b"]。開いたノートを見えるようにするために使う。
+    nonisolated static func ancestors(of path: String) -> [String] {
+        var out: [String] = []
+        var prefix = ""
+        for part in path.split(separator: "/").dropLast() {
+            prefix = prefix.isEmpty ? String(part) : prefix + "/" + part
+            out.append(prefix)
+        }
+        return out
+    }
+
+    nonisolated static func allFolders(_ nodes: [NoteNode]) -> Set<String> {
+        var out: Set<String> = []
+        for node in nodes where node.isFolder {
+            out.insert(node.id)
+            if let children = node.children { out.formUnion(allFolders(children)) }
+        }
+        return out
+    }
 }
