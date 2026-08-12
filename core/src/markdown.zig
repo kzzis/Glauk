@@ -57,6 +57,10 @@ pub const SpanKind = enum(u8) {
     block_id = 50, // 行末の ^abc123
     auto_link = 51, // 生の http(s):// URL
     callout_body = 52, // コールアウトの2行目以降(帯を続けるための目印)
+    // --- diff / patch ---
+    code_added = 53, // + の行
+    code_removed = 54, // - の行
+    code_meta = 55, // @@ や diff --git などのヘッダ行
 };
 
 /// Swiftに渡す構造体。UTF-16コードユニット単位。
@@ -682,6 +686,9 @@ fn scanAll(gpa: std.mem.Allocator, text: []const u8, out: *std.ArrayList(ByteSpa
                         .comment => .code_comment,
                         .type_name => .code_type,
                         .function => .code_function,
+                        .added => .code_added,
+                        .removed => .code_removed,
+                        .meta => .code_meta,
                     },
                 });
             }
@@ -1373,4 +1380,55 @@ test "a callout keeps going while the quote does" {
     try testing.expectEqual(@as(usize, 1), kindsOf(spans, .callout));
     // 本文2行だけが続き。段落で切れ、その後の引用は巻き込まない。
     try testing.expectEqual(@as(usize, 2), kindsOf(spans, .callout_body));
+}
+
+test "a diff fence colours whole lines, not the code inside them" {
+    const gpa = testing.allocator;
+    const spans = try parse(gpa,
+        \\```diff
+        \\@@ -1,4 +1,6 @@
+        \\   "dev:api": "dotnet run",
+        \\+  "build": "pnpm build:web",
+        \\-  "publish:api": "dotnet publish"
+        \\```
+        \\
+    );
+    defer gpa.free(spans);
+    try testing.expectEqual(@as(usize, 1), kindsOf(spans, .code_added));
+    try testing.expectEqual(@as(usize, 1), kindsOf(spans, .code_removed));
+    try testing.expectEqual(@as(usize, 1), kindsOf(spans, .code_meta));
+    // ★ 中身は元の言語のコード。文字列として色を付けると全部おなじ色になる。
+    try testing.expectEqual(@as(usize, 0), kindsOf(spans, .code_string));
+    try testing.expectEqual(@as(usize, 0), kindsOf(spans, .code_number));
+}
+
+test "diff file headers are meta, not additions or removals" {
+    const gpa = testing.allocator;
+    const spans = try parse(gpa,
+        \\```diff
+        \\diff --git a/x.json b/x.json
+        \\index 1234567..89abcde 100644
+        \\--- a/x.json
+        \\+++ b/x.json
+        \\```
+        \\
+    );
+    defer gpa.free(spans);
+    try testing.expectEqual(@as(usize, 4), kindsOf(spans, .code_meta));
+    try testing.expectEqual(@as(usize, 0), kindsOf(spans, .code_added));
+    try testing.expectEqual(@as(usize, 0), kindsOf(spans, .code_removed));
+}
+
+test "context lines in a diff get no token at all" {
+    const gpa = testing.allocator;
+    const spans = try parse(gpa,
+        \\```diff
+        \\ そのままの行
+        \\```
+        \\
+    );
+    defer gpa.free(spans);
+    try testing.expectEqual(@as(usize, 0), kindsOf(spans, .code_added));
+    try testing.expectEqual(@as(usize, 0), kindsOf(spans, .code_removed));
+    try testing.expectEqual(@as(usize, 0), kindsOf(spans, .code_meta));
 }

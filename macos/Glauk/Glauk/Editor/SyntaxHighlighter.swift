@@ -64,6 +64,12 @@ struct EditorTypography {
     var codeComment = NSColor.secondaryLabelColor
     /// ブロック右上に出す言語名
     var codeLangLabel = NSColor.tertiaryLabelColor
+    // --- diff ---
+    var codeAdded = dynamicColor(dark: 0x7EE787, light: 0x116329)
+    var codeRemoved = dynamicColor(dark: 0xFFA198, light: 0x82071E)
+    var codeMeta = dynamicColor(dark: 0x8B949E, light: 0x57606A)
+    var codeAddedBg = dynamicColor(dark: 0x0F3A20, light: 0xDAFBE1)
+    var codeRemovedBg = dynamicColor(dark: 0x4A1418, light: 0xFFEBE9)
 
     /// 引用の縦棒の色と太さ
     var quoteBar = NSColor.systemRed
@@ -198,6 +204,8 @@ final class SyntaxHighlighter {
         storage.removeAttribute(.glaukCheckbox, range: scope)
         storage.removeAttribute(.glaukBullet, range: scope)
         storage.removeAttribute(.glaukCallout, range: scope)
+        storage.removeAttribute(.glaukTag, range: scope)
+        storage.removeAttribute(.glaukDiff, range: scope)
         storage.addAttribute(.paragraphStyle, value: typography.bodyParagraph, range: scope)
 
         // ★ Obsidian と同じ考え方: カーソルがテーブルの中にある間は原文のまま見せ、
@@ -378,6 +386,18 @@ final class SyntaxHighlighter {
                 let lineRange = ns.lineRange(for: span.range)
                 storage.addAttribute(.glaukCallout, value: lastCalloutType, range: lineRange)
                 storage.removeAttribute(.glaukQuote, range: lineRange)
+
+            case .codeAdded, .codeRemoved:
+                let added = span.kind == .codeAdded
+                storage.addAttribute(.foregroundColor,
+                                     value: added ? typography.codeAdded : typography.codeRemoved,
+                                     range: span.range)
+                // 行まるごとの下地は MarkdownLayoutManager が描く。
+                // ★ 改行まで含めないと、折り返しのない短い行で帯が途切れる。
+                storage.addAttribute(.glaukDiff, value: added, range: ns.lineRange(for: span.range))
+
+            case .codeMeta:
+                storage.addAttribute(.foregroundColor, value: typography.codeMeta, range: span.range)
 
             case .embedMarker, .escape:
                 if !onCursorLine { storage.addAttribute(.glaukHidden, value: true, range: span.range) }

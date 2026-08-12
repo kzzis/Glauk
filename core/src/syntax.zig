@@ -4,7 +4,18 @@
 //! だけを拾う。行単位で処理し、ブロックコメントだけ行をまたぐ状態を持つ。
 const std = @import("std");
 
-pub const TokenKind = enum { keyword, string, number, comment, type_name, function };
+pub const TokenKind = enum {
+    keyword,
+    string,
+    number,
+    comment,
+    type_name,
+    function,
+    // --- diff 用。行まるごとに付く ---
+    added,
+    removed,
+    meta,
+};
 
 pub const Token = struct {
     start: usize,
@@ -19,6 +30,8 @@ pub const Lang = struct {
     /// 文字列の開始に使える引用符
     quotes: []const u8 = "\"",
     keywords: []const []const u8 = &.{},
+    /// diff / patch。行の1文字目で色を決めるので、通常のトークン分けはしない。
+    is_diff: bool = false,
 };
 
 const swift_kw = [_][]const u8{
@@ -160,7 +173,36 @@ pub fn langFromInfo(info_raw: []const u8) Lang {
     if (eq(u8, lower, "sql")) {
         return .{ .line_comment = "--", .quotes = "'\"" };
     }
+    if (eq(u8, lower, "diff") or eq(u8, lower, "patch")) {
+        return .{ .is_diff = true };
+    }
     return .{};
+}
+
+/// diff の1行を、先頭の記号だけで見分ける。
+/// ★ 中身は元の言語のコードなので、文字列や数値として色を付けてはいけない。
+///   `"a": "b"` だらけの JSON の diff が全部おなじ色になって読めなくなる。
+fn diffLineKind(line: []const u8) ?TokenKind {
+    if (line.len == 0) return null;
+    // `+++ b/file` `--- a/file` はヘッダ。追加/削除より先に見る。
+    if (std.mem.startsWith(u8, line, "+++") or std.mem.startsWith(u8, line, "---")) return .meta;
+    return switch (line[0]) {
+        '+' => .added,
+        '-' => .removed,
+        '@' => .meta, // @@ -1,4 +1,6 @@
+        'd', 'i', 'n', 'r', 'S' => blk: {
+            // diff --git / index / new file / rename / similarity
+            const heads = [_][]const u8{
+                "diff ",       "index ",  "new file",   "deleted file",
+                "rename ",     "similarity ", "old mode", "new mode",
+            };
+            for (heads) |h| {
+                if (std.mem.startsWith(u8, line, h)) break :blk .meta;
+            }
+            break :blk null;
+        },
+        else => null,
+    };
 }
 
 fn isIdentStart(c: u8) bool {
@@ -187,6 +229,13 @@ pub fn tokenizeLine(
     out: *std.ArrayList(Token),
 ) !void {
     var i: usize = 0;
+
+    if (lang.is_diff) {
+        if (diffLineKind(line)) |kind| {
+            try out.append(gpa, .{ .start = base, .len = line.len, .kind = kind });
+        }
+        return;
+    }
 
     // 前の行から続くブロックコメント
     if (in_block.*) {

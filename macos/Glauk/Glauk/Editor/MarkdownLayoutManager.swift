@@ -19,6 +19,10 @@ final class MarkdownLayoutManager: NSLayoutManager {
     var calloutTint: (String) -> NSColor = { _ in .systemBlue }
     var tagBgColor = NSColor.systemBlue.withAlphaComponent(0.18)
     var tagCornerRadius: CGFloat = 4
+    var diffAddedBgColor = NSColor.systemGreen.withAlphaComponent(0.14)
+    var diffRemovedBgColor = NSColor.systemRed.withAlphaComponent(0.14)
+    var diffAddedBarColor = NSColor.systemGreen
+    var diffRemovedBarColor = NSColor.systemRed
 
     /// 属性が連続している範囲ごとに、その行たちを囲む矩形を返す
     private func blockRects(for key: NSAttributedString.Key,
@@ -113,6 +117,20 @@ final class MarkdownLayoutManager: NSLayoutManager {
                 text.draw(at: NSPoint(x: box.maxX - size.width - 10, y: box.minY + 6),
                           withAttributes: attrs)
             }
+        }
+
+        // --- diff の + / - 行: コードブロックの中に薄い下地を敷く ---
+        // ★ コードブロックの角丸の「あと」に描く。先に描くと上から塗り潰される。
+        for (range, rect) in blockRects(for: .glaukDiff, in: charRange, origin: origin) {
+            guard let added = storage.attribute(.glaukDiff, at: range.location,
+                                                effectiveRange: nil) as? Bool else { continue }
+            let box = NSRect(x: origin.x + container.lineFragmentPadding, y: rect.minY,
+                             width: fullWidth, height: rect.height)
+            (added ? diffAddedBgColor : diffRemovedBgColor).setFill()
+            box.fill()
+            // 左端に濃い縦帯。色が薄くても + と - を見分けられるように。
+            (added ? diffAddedBarColor : diffRemovedBarColor).setFill()
+            NSRect(x: box.minX, y: box.minY, width: 2, height: box.height).fill()
         }
 
         // --- タグ: 文字に沿った角丸の下地 ---

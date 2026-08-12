@@ -31,6 +31,7 @@ enum SpanKind: UInt8 {
     case blockID = 50
     case autoLink = 51
     case calloutBody = 52
+    case codeAdded = 53, codeRemoved = 54, codeMeta = 55
 }
 
 struct Span {
@@ -67,6 +68,8 @@ extension NSAttributedString.Key {
     static let glaukCallout = NSAttributedString.Key("glauk.callout")
     /// #タグ の角丸の下地を描く範囲
     static let glaukTag = NSAttributedString.Key("glauk.tag")
+    /// diff の + / - の行。値は追加なら true(行の左に色帯を描く)
+    static let glaukDiff = NSAttributedString.Key("glauk.diff")
 }
 
 enum MarkdownParser {
