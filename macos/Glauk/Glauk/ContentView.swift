@@ -10,9 +10,11 @@ struct ContentView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
+                // ★ フォルダ未設定でも押せるようにしておく。disabled にすると
+                //   ⌘O が無反応になり、「vault を指定する場所が無い」ように見える。
+                //   未設定のときはスイッチャー側が「フォルダを選ぶ…」を出す。
                 Button("ノートを探す…") { showSwitcher = true }
                     .keyboardShortcut("o", modifiers: .command)
-                    .disabled(!noteIndex.hasFolder)
                 Button("開く…") { document.openWithPanel() }
                     .keyboardShortcut("o", modifiers: [.command, .shift])
                 Button("新規…") { document.createWithPanel() }
@@ -24,6 +26,7 @@ struct ContentView: View {
                         .truncationMode(.head)
                 }
                 Spacer()
+                vaultButton
                 if let error = document.lastError {
                     Text(error)
                         .font(.caption)
@@ -56,6 +59,29 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(
             for: NSApplication.didBecomeActiveNotification)) { _ in
             Task { await noteIndex.refresh(root: notesFolder.root) }
+        }
+    }
+
+    /// vault が設定済みなら件数を、未設定なら選ばせる。⌘, を知らなくても辿り着けるように。
+    @ViewBuilder
+    private var vaultButton: some View {
+        if noteIndex.hasFolder, let root = notesFolder.root {
+            Button {
+                notesFolder.chooseWithPanel()
+            } label: {
+                Label(
+                    noteIndex.isScanning
+                        ? "走査中…"
+                        : "\((root as NSString).lastPathComponent) · \(noteIndex.names.count)",
+                    systemImage: notesFolder.looksLikeObsidianVault ? "shippingbox" : "folder"
+                )
+                .font(.caption)
+            }
+            .buttonStyle(.link)
+            .help(root)
+        } else {
+            Button("vault を選ぶ…") { notesFolder.chooseWithPanel() }
+                .font(.caption)
         }
     }
 
