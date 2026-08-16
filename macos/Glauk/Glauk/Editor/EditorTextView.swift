@@ -33,6 +33,36 @@ final class EditorTextView: NSTextView {
         super.mouseDown(with: event)      // ← リンク以外は通常動作
     }
 
+    /// ★ ⌘[ / ⌘] はここで拾う。ツールバーのボタンに .keyboardShortcut を
+    ///   付けているだけだと、このテキストビューが firstResponder のときは
+    ///   AppKit 側が先にキーを食べてしまい、届かないことがある。
+    override func keyDown(with event: NSEvent) {
+        if event.modifierFlags.contains(.command) {
+            switch event.charactersIgnoringModifiers {
+            case "[":
+                NotificationCenter.default.post(name: .glaukGoBack, object: nil)
+                return
+            case "]":
+                NotificationCenter.default.post(name: .glaukGoForward, object: nil)
+                return
+            default: break
+            }
+        }
+        super.keyDown(with: event)
+    }
+
+    /// 多ボタンマウスの戻る/進む
+    override func otherMouseDown(with event: NSEvent) {
+        switch event.buttonNumber {
+        case 3:
+            NotificationCenter.default.post(name: .glaukGoBack, object: nil)
+        case 4:
+            NotificationCenter.default.post(name: .glaukGoForward, object: nil)
+        default:
+            super.otherMouseDown(with: event)
+        }
+    }
+
     /// リンクの上でカーソルを指差しに変える
     override func resetCursorRects() {
         super.resetCursorRects()
