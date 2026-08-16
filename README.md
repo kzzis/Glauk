@@ -4,8 +4,6 @@
 
 <h1 align="center">Glauk</h1>
 
-<p align="center"><em>glaukopis — bright-eyed, owl-eyed.</em></p>
-
 <p align="center">A Markdown editor for macOS, built for the thought you are having right now.</p>
 
 ![](docs/editor.png)
