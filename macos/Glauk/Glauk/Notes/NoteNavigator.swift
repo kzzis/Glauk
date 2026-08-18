@@ -119,4 +119,9 @@ final class NoteNavigator: ObservableObject {
 extension Notification.Name {
     static let glaukGoBack = Notification.Name("glauk.goBack")
     static let glaukGoForward = Notification.Name("glauk.goForward")
+    // ★ WindowGroup を外したのでメニューが唯一の確実な経路になった。
+    //   ボタンの .keyboardShortcut は本文にフォーカスがあると届かないことがある。
+    static let glaukFindNote = Notification.Name("glauk.findNote")
+    static let glaukOpenFile = Notification.Name("glauk.openFile")
+    static let glaukNewFile = Notification.Name("glauk.newFile")
 }

@@ -9,6 +9,14 @@ protocol EditorTextViewDelegate: AnyObject {
 final class EditorTextView: NSTextView {
     weak var linkDelegate: EditorTextViewDelegate?
 
+    #if DEBUG
+    /// 呼び出しからカーソルが出るまでを測る。仕様書の受け入れ基準 p95 < 300ms 用。
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        SummonClock.firstDraw()
+    }
+    #endif
+
     override func mouseDown(with event: NSEvent) {
         guard let storage = textStorage else {
             super.mouseDown(with: event); return
