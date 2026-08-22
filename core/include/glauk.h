@@ -34,6 +34,7 @@ int32_t glauk_pty_spawn(int agent, const char* cwd);   // 0=claude, 1=codex
 ssize_t glauk_pty_read(int32_t id, uint8_t* buf, size_t len);   // 0=EOF, -1=エラー
 bool    glauk_pty_write(int32_t id, const uint8_t* data, size_t len);
 bool    glauk_pty_resize(int32_t id, uint16_t rows, uint16_t cols);
+int32_t glauk_pty_poll(int32_t id, int32_t timeout_ms);  // 1=読める, 0=時間切れ, -1=エラー
 void    glauk_pty_kill(int32_t id);
 size_t  glauk_pty_session_count(void);
 
