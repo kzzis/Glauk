@@ -53,6 +53,9 @@ final class EditorTextView: NSTextView {
             case "]":
                 NotificationCenter.default.post(name: .glaukGoForward, object: nil)
                 return
+            case "j":
+                NotificationCenter.default.post(name: .glaukToggleAgent, object: nil)
+                return
             default: break
             }
         }

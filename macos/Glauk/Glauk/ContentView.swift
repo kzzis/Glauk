@@ -8,6 +8,12 @@ struct ContentView: View {
     /// ノート間の移動は全部ここを通す。ContentView は入口を並べるだけにする。
     @StateObject private var navigator: NoteNavigator
     @State private var showSwitcher = false
+    /// ★ 開くまで作らない。常に生成すると SwiftTerm の初期化コストが
+    ///   ⌥Space の出現時間(p95 < 300ms)に乗ってしまう。
+    @State private var agent: AgentPaneController?
+    @State private var showAgent = false
+    /// ★ @AppStorage は Int32 を扱えないので Int で持つ
+    @AppStorage("glauk.defaultAgent") private var defaultAgent = Int(AgentKind.claude.rawValue)
     /// 名前を尋ねるダイアログ(新規ノート / 新規フォルダ / 名前を変更)
     @State private var namePrompt: NamePrompt?
     @State private var nameInput = ""
@@ -57,6 +63,11 @@ struct ContentView: View {
                                  onOpenNote: { name in
                                      Task { await navigator.follow(link: name) }
                                  })
+
+                if showAgent, let agent {
+                    Divider()
+                    agentPane(agent).frame(width: 420)
+                }
             }
         }
         .frame(minWidth: 900, minHeight: 700)
@@ -106,6 +117,9 @@ struct ContentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .glaukNewFile)) { _ in
             document.createWithPanel()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .glaukToggleAgent)) { _ in
+            toggleAgent()
         }
         // 起動時
         .task { await noteIndex.refresh(root: notesFolder.root) }
@@ -209,6 +223,64 @@ struct ContentView: View {
             Button("vault を選ぶ…") { notesFolder.chooseWithPanel() }
                 .font(.caption)
         }
+    }
+
+    // MARK: - AIペイン
+
+    @ViewBuilder
+    private func agentPane(_ agent: AgentPaneController) -> some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Agent").font(.system(size: 11)).foregroundStyle(.secondary)
+                Spacer()
+                Picker("", selection: $defaultAgent) {
+                    ForEach(AgentKind.allCases) { kind in
+                        Text(kind.displayName).tag(Int(kind.rawValue))
+                    }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .frame(width: 130)
+                .onChange(of: defaultAgent) { _, newValue in
+                    // 切り替えは作り直し。同じ会話は引き継げない。
+                    guard showAgent else { return }
+                    agent.start(agent: AgentKind(rawValue: Int32(newValue)) ?? .claude,
+                                cwd: workingDirectory)
+                }
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 28)
+            Divider()
+            AgentPaneView(controller: agent)
+            if let message = agent.errorMessage {
+                Divider()
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+
+    private func toggleAgent() {
+        if showAgent {
+            agent?.stop()          // ★ 仕様: 閉じたら必ず終了。常駐させない
+            showAgent = false
+            return
+        }
+        let controller = agent ?? AgentPaneController()
+        agent = controller
+        showAgent = true
+        controller.start(agent: AgentKind(rawValue: Int32(defaultAgent)) ?? .claude,
+                         cwd: workingDirectory)
+    }
+
+    /// 開いているファイルのディレクトリ。未保存ならホーム。
+    /// ★ / や /tmp にすると、エージェントが変な場所を触りかねない。
+    private var workingDirectory: String {
+        guard let path = document.path else { return NSHomeDirectory() }
+        return (path as NSString).deletingLastPathComponent
     }
 
     // MARK: - ツリーからのファイル操作

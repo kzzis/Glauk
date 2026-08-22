@@ -124,4 +124,5 @@ extension Notification.Name {
     static let glaukFindNote = Notification.Name("glauk.findNote")
     static let glaukOpenFile = Notification.Name("glauk.openFile")
     static let glaukNewFile = Notification.Name("glauk.newFile")
+    static let glaukToggleAgent = Notification.Name("glauk.toggleAgent")
 }
