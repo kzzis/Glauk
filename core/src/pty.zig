@@ -10,6 +10,7 @@ const c = @cImport({
     @cInclude("unistd.h"); // chdir, execvp, _exit
     @cInclude("signal.h"); // kill
     @cInclude("sys/ioctl.h"); // TIOCSWINSZ
+    @cInclude("poll.h"); // poll
 });
 
 var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
@@ -136,6 +137,17 @@ pub export fn glauk_pty_kill(id: i32) callconv(.c) void {
     _ = std.posix.waitpid(s.pid, 0); // ゾンビ(<defunct>)を残さない
 }
 
+/// 読めるデータが来るまで待つ。1=読める / 0=時間切れ / -1=エラー。
+/// ★ read はブロッキングなので、これが無いと「相手が黙ったまま」のときに
+///   永久に待つ。demo を有限時間で終わらせるために要る。
+pub export fn glauk_pty_poll(id: i32, timeout_ms: i32) callconv(.c) i32 {
+    const s = lookup(id) orelse return -1;
+    var fds = [_]c.struct_pollfd{.{ .fd = s.master, .events = c.POLLIN, .revents = 0 }};
+    const n = c.poll(&fds, 1, timeout_ms);
+    if (n < 0) return -1;
+    return if (n == 0) 0 else 1;
+}
+
 /// 生きているセッションの数(demo とテスト用)
 pub export fn glauk_pty_session_count() callconv(.c) usize {
     sessions_lock.lock();
@@ -152,6 +164,7 @@ test "知らないセッションIDは読み書きを断る" {
     try testing.expectEqual(@as(isize, -1), glauk_pty_read(9999, undefined, 0));
     try testing.expect(!glauk_pty_write(9999, "x", 1));
     try testing.expect(!glauk_pty_resize(9999, 24, 80));
+    try testing.expectEqual(@as(i32, -1), glauk_pty_poll(9999, 0));
 }
 
 test "知らないIDをkillしても落ちない" {

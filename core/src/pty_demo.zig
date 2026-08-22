@@ -27,18 +27,36 @@ pub fn main() !void {
     std.debug.print("spawned session {d} in {s}\n", .{ id, cwd });
     _ = pty.glauk_pty_resize(id, 40, 120);
 
-    var out_buf: [4096]u8 = undefined;
-    var out = std.fs.File.stdout().writer(&out_buf);
+    // ★ バッファに溜めない。溜めると、相手が黙っている間ずっと画面に何も出ない。
+    //   端末に直接書く。
+    const out = std.fs.File.stdout();
+    const quiet_ms = 2000;
     var total: usize = 0;
+    var reason: []const u8 = "上限に達した";
     while (true) {
+        // ★ read はブロッキング。claude はバナーを出したあと入力を待つので、
+        //   これが無いと永久に返ってこない。
+        switch (pty.glauk_pty_poll(id, quiet_ms)) {
+            0 => {
+                reason = "出力が止まった";
+                break;
+            },
+            1 => {},
+            else => {
+                reason = "pollエラー";
+                break;
+            },
+        }
         const n = pty.glauk_pty_read(id, &buf, buf.len);
-        if (n <= 0) break;
-        try out.interface.writeAll(buf[0..@intCast(n)]);
+        if (n <= 0) {
+            reason = "EOF(子プロセスが終了した)";
+            break;
+        }
+        try out.writeAll(buf[0..@intCast(n)]);
         total += @intCast(n);
-        if (total > 8192) break; // 起動バナーが見えれば十分
+        if (total > 64 * 1024) break;
     }
-    try out.interface.flush();
 
     pty.glauk_pty_kill(id);
-    std.debug.print("\n--- read {d} bytes, session killed (残りセッション {d}) ---\n", .{ total, pty.glauk_pty_session_count() });
+    std.debug.print("\n--- {d} バイト読んだ / {s} / セッションを終了(残り {d}) ---\n", .{ total, reason, pty.glauk_pty_session_count() });
 }
