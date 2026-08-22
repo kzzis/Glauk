@@ -1,6 +1,18 @@
 // NoteTreeView.swift
 import SwiftUI
 
+/// ツリーから頼まれた操作。実際に何をするかは ContentView が決める。
+/// ★ 確認ダイアログや索引の更新まで View に持たせると、行の描画と混ざって読めなくなる。
+enum NoteTreeAction {
+    case open(String)                    // 相対パス
+    case newNote(inFolder: String)       // 相対パス。ルートは ""
+    case newFolder(inFolder: String)
+    case rename(String)
+    case move(String)
+    case trash(String)
+    case reveal(String)
+}
+
 /// 左のノートツリー。⌘\ で出し入れする。
 /// 仕様書の Zen モードを壊さないよう、既定では出るが畳めば元の単一画面に戻る。
 struct NoteTreeView: View {
@@ -9,8 +21,8 @@ struct NoteTreeView: View {
 
     /// いま開いているノートの相対パス(強調表示と自動展開に使う)
     var currentPath: String?
-    /// 相対パスを渡す
-    var onOpen: (String) -> Void
+    /// 相対パスを添えて頼む
+    var onAction: (NoteTreeAction) -> Void
 
     /// ★ 開閉は自分で持つ。List(children:) 任せにすると、
     ///   走査のたびにツリーが作り直されて開いていたフォルダが全部閉じる
@@ -55,6 +67,17 @@ struct NoteTreeView: View {
             .help("すべて畳む")
 
             Spacer()
+            Menu {
+                Button("新規ノート") { onAction(.newNote(inFolder: "")) }
+                Button("新規フォルダ") { onAction(.newFolder(inFolder: "")) }
+            } label: {
+                Image(systemName: "plus")
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .frame(width: 22)
+            .help("vault の直下に作る")
+
             Text("\(noteIndex.names.count)")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
@@ -122,9 +145,24 @@ struct NoteTreeView: View {
             if node.isFolder {
                 toggle(node.id)
             } else {
-                onOpen(node.id)
+                onAction(.open(node.id))
             }
         }
+        .contextMenu { menu(for: node) }
+    }
+
+    /// 右クリックのメニュー。フォルダならその中に、ノートなら同じ階層に作る。
+    @ViewBuilder
+    private func menu(for node: NoteNode) -> some View {
+        let container = node.isFolder ? node.id : (node.id as NSString).deletingLastPathComponent
+        Button("新規ノート") { onAction(.newNote(inFolder: container)) }
+        Button("新規フォルダ") { onAction(.newFolder(inFolder: container)) }
+        Divider()
+        Button("名前を変更…") { onAction(.rename(node.id)) }
+        Button("移動…") { onAction(.move(node.id)) }
+        Divider()
+        Button("Finder で表示") { onAction(.reveal(node.id)) }
+        Button("ゴミ箱に入れる") { onAction(.trash(node.id)) }
     }
 
     private var empty: some View {

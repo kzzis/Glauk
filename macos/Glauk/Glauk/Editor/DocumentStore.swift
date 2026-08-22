@@ -14,8 +14,8 @@ final class DocumentStore: ObservableObject {
     /// (テキストビューがfirstResponderのままだと通常のbinding経由の更新は無視されるため)
     @Published private(set) var revision = 0
 
-    private var saveTask: Task<Void, Never>?
-    private var suppressAutosave = false
+    fileprivate var saveTask: Task<Void, Never>?
+    fileprivate var suppressAutosave = false
     private let debounce: Duration = .milliseconds(800)
 
     /// 失敗を上部バーに出す。ナビゲータからも使う。
@@ -74,5 +74,22 @@ final class DocumentStore: ObservableObject {
             GlaukFile.write(path: path, contents: snapshot)   // 別スレッドで書く
         }.value
         if !ok { lastError = "保存に失敗しました" }
+    }
+}
+
+extension DocumentStore {
+    /// 開いているファイルが消えたとき。中身は残さない。
+    func close() {
+        saveTask?.cancel()
+        suppressAutosave = true
+        path = nil
+        text = ""
+        revision += 1
+        suppressAutosave = false
+    }
+
+    /// 中身はそのままに、書き戻し先だけ付け替える(名前の変更・移動のあと)。
+    func rebind(to newPath: String) {
+        path = newPath
     }
 }
