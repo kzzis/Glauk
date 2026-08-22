@@ -45,6 +45,9 @@ pub fn build(b: *std.Build) void {
         .link_libc = true,
     });
     const demo = b.addExecutable(.{ .name = "pty-demo", .root_module = demo_mod });
+    // ★ zig-out/bin にも置く。PATH を削って試すとき、zig 自体(mise の shim)も
+    //   消えてしまうので、デモだけ単体で起動できる必要がある。
+    b.getInstallStep().dependOn(&b.addInstallArtifact(demo, .{}).step);
     const run_demo = b.addRunArtifact(demo);
     if (b.args) |args| run_demo.addArgs(args);
     b.step("pty-demo", "Run the PTY demo CLI").dependOn(&run_demo.step);
