@@ -72,6 +72,15 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .glaukGoForward)) { _ in
             Task { await navigator.goForward() }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .glaukFindNote)) { _ in
+            showSwitcher = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .glaukOpenFile)) { _ in
+            document.openWithPanel()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .glaukNewFile)) { _ in
+            document.createWithPanel()
+        }
         // 起動時
         .task { await noteIndex.refresh(root: notesFolder.root) }
         // 設定を変えたとき
@@ -113,9 +122,7 @@ struct ContentView: View {
             //   ⌘O が無反応になり、「vault を指定する場所が無い」ように見える。
             //   未設定のときはスイッチャー側が「フォルダを選ぶ…」を出す。
             Button("ノートを探す…") { showSwitcher = true }
-                .keyboardShortcut("o", modifiers: .command)
             Button("開く…") { document.openWithPanel() }
-                .keyboardShortcut("o", modifiers: [.command, .shift])
             Button("新規…") { document.createWithPanel() }
 
             // 仕様書の「UIクロームは無彩色」に従い、現在地はノート名だけ出す
