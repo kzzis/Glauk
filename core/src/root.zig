@@ -6,6 +6,7 @@ pub const syntax = @import("syntax.zig");
 pub const file = @import("file.zig");
 pub const watch = @import("watch.zig");
 pub const notes = @import("notes.zig");
+pub const pty = @import("pty.zig");
 
 export fn glauk_ping() callconv(.c) [*:0]const u8 {
     return "pong";
@@ -17,4 +18,5 @@ comptime {
     _ = file;
     _ = watch;
     _ = notes;
+    _ = pty;
 }

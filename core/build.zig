@@ -11,6 +11,8 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/root.zig"),
             .target = target,
             .optimize = optimize,
+            // ★ forkpty / execvp を使うので libc が要る
+            .link_libc = true,
         }),
     });
 
@@ -35,6 +37,18 @@ pub fn build(b: *std.Build) void {
     replace.step.dependOn(&repack.step);
 
     b.getInstallStep().dependOn(&replace.step);
+    // --- PTY を Swift 抜きで試すCLI ---
+    const demo_mod = b.createModule(.{
+        .root_source_file = b.path("src/pty_demo.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const demo = b.addExecutable(.{ .name = "pty-demo", .root_module = demo_mod });
+    const run_demo = b.addRunArtifact(demo);
+    if (b.args) |args| run_demo.addArgs(args);
+    b.step("pty-demo", "Run the PTY demo CLI").dependOn(&run_demo.step);
+
     b.installFile("include/glauk.h", "include/glauk.h");
     b.installFile("include/module.modulemap", "include/module.modulemap");
 }
