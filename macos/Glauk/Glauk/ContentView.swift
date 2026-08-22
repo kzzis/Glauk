@@ -121,35 +121,31 @@ struct ContentView: View {
     }
 
     private var toolbar: some View {
-        HStack {
-            Button {
-                showTree.toggle()
-            } label: {
-                Image(systemName: showTree ? "sidebar.left" : "sidebar.leading")
-            }
-            // ★ ⌘\ はメニュー側(GlaukApp)が持つ。ここにも付けると同じキーの
-            //   引き受け手が2つになる。
-            .help("ノートツリーを出し入れ (⌘\\)")
+        HStack(spacing: 2) {
+            iconButton(showTree ? "sidebar.left" : "sidebar.leading",
+                       // ★ ⌘\ はメニュー側(GlaukApp)が持つ。ここにも付けると
+                       //   同じキーの引き受け手が2つになる。
+                       help: "ノートツリーを出し入れ (⌘\\)") { showTree.toggle() }
+
+            Divider().frame(height: 14).padding(.horizontal, 4)
 
             // ★ ⌘[ / ⌘] も EditorTextView 側で拾う。ここに .keyboardShortcut を
             //   付けると、本文にフォーカスがあるとき二重に反応する。
-            Button { Task { await navigator.goBack() } } label: {
-                Image(systemName: "chevron.left")
+            iconButton("chevron.left", help: "戻る (⌘[)", enabled: navigator.canGoBack) {
+                Task { await navigator.goBack() }
             }
-            .disabled(!navigator.canGoBack)
-            .help("戻る (⌘[)")
-            Button { Task { await navigator.goForward() } } label: {
-                Image(systemName: "chevron.right")
+            iconButton("chevron.right", help: "進む (⌘])", enabled: navigator.canGoForward) {
+                Task { await navigator.goForward() }
             }
-            .disabled(!navigator.canGoForward)
-            .help("進む (⌘])")
+
+            Divider().frame(height: 14).padding(.horizontal, 4)
 
             // ★ フォルダ未設定でも押せるようにしておく。disabled にすると
-            //   ⌘O が無反応になり、「vault を指定する場所が無い」ように見える。
+            //   無反応になり、「vault を指定する場所が無い」ように見える。
             //   未設定のときはスイッチャー側が「フォルダを選ぶ…」を出す。
-            Button("ノートを探す…") { showSwitcher = true }
-            Button("開く…") { document.openWithPanel() }
-            Button("新規…") { document.createWithPanel() }
+            iconButton("magnifyingglass", help: "ノートを探す (⌘O)") { showSwitcher = true }
+            iconButton("square.and.pencil", help: "新規ファイル…") { document.createWithPanel() }
+            iconButton("folder", help: "ファイルを開く (⇧⌘O)") { document.openWithPanel() }
 
             // 仕様書の「UIクロームは無彩色」に従い、現在地はノート名だけ出す
             if let name = navigator.currentName {
@@ -158,18 +154,38 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
+                    .padding(.leading, 6)
                     .help(document.path ?? "")
             }
-            Spacer()
-            vaultButton
+            Spacer(minLength: 8)
             if let error = document.lastError {
                 Text(error)
                     .font(.caption)
                     .foregroundStyle(.red)
                     .lineLimit(1)
             }
+            vaultButton
         }
-        .padding(8)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+    }
+
+    /// ツールバーのアイコンボタン。
+    /// ★ .borderless にすると押せる範囲が絵の輪郭だけになるので、
+    ///   同じ大きさの枠を敷いて当たり判定を揃える。
+    private func iconButton(_ symbol: String,
+                            help: String,
+                            enabled: Bool = true,
+                            action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 13))
+                .frame(width: 26, height: 22)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.borderless)
+        .disabled(!enabled)
+        .help(help)
     }
 
     /// vault が設定済みなら件数を、未設定なら選ばせる。⌘, を知らなくても辿り着けるように。
