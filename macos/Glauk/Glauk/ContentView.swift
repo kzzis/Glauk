@@ -8,6 +8,8 @@ struct ContentView: View {
     /// ノート間の移動は全部ここを通す。ContentView は入口を並べるだけにする。
     @StateObject private var navigator: NoteNavigator
     @State private var showSwitcher = false
+    /// 外部からの書き換えを見張る。AIエージェントや Obsidian の編集に気づくため。
+    @StateObject private var watcher = FileWatcher()
     /// 名前を尋ねるダイアログ(新規ノート / 新規フォルダ / 名前を変更)
     @State private var namePrompt: NamePrompt?
     @State private var nameInput = ""
@@ -106,6 +108,19 @@ struct ContentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .glaukNewFile)) { _ in
             document.createWithPanel()
+        }
+        .onAppear {
+            watcher.onExternalChange = { _ in
+                guard let result = document.reloadFromDisk() else { return }
+                // Step 8b でここに「にじみ」を入れる
+                #if DEBUG
+                print("[watch] 読み直した / 変わった行 \(result.changedLines)")
+                #endif
+            }
+        }
+        // 開いているノートが変わったら見張る先も変える
+        .onChange(of: document.path) { _, newPath in
+            watcher.watch(path: newPath)
         }
         // 起動時
         .task { await noteIndex.refresh(root: notesFolder.root) }
