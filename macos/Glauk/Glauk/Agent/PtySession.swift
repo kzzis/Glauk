@@ -21,10 +21,12 @@ enum AgentKind: Int32, CaseIterable, Identifiable {
 ///   画面が無くても起動・読み書き・後始末を確かめられる。
 final class PtySession {
     /// 出力が来るたびに呼ばれる。メインスレッドで呼ぶ。
-    var onOutput: ((ArraySlice<UInt8>) -> Void)?
+    /// ★ このプロジェクトは既定が MainActor 隔離。SwiftTerm のデリゲートは
+    ///   その外から呼ばれるので、この型は隔離の外に置く必要がある。
+    nonisolated(unsafe) var onOutput: ((ArraySlice<UInt8>) -> Void)?
     /// 子が終わったときに1度だけ呼ばれる。メインスレッドで呼ぶ。
     /// `sawAnyOutput` が false なら、1バイトも出さずに落ちた = CLI が見つからない。
-    var onExit: ((_ sawAnyOutput: Bool) -> Void)?
+    nonisolated(unsafe) var onExit: ((_ sawAnyOutput: Bool) -> Void)?
 
     /// ★ SwiftTerm のデリゲートは @MainActor の外から呼ばれる。
     ///   Zig 側の表は Mutex で守られていて、知らないIDには安全に失敗するので、
@@ -32,16 +34,16 @@ final class PtySession {
     private nonisolated(unsafe) var id: Int32 = -1
     private let lock = NSLock()
 
-    var sessionId: Int32 {
+    nonisolated var sessionId: Int32 {
         lock.lock(); defer { lock.unlock() }
         return id
     }
 
-    var isRunning: Bool { sessionId >= 0 }
+    nonisolated var isRunning: Bool { sessionId >= 0 }
 
     /// 起動できたら true。
     @discardableResult
-    func start(agent: AgentKind, cwd: String) -> Bool {
+    nonisolated func start(agent: AgentKind, cwd: String) -> Bool {
         stop()
         let newId = cwd.withCString { glauk_pty_spawn(agent.rawValue, $0) }
         guard newId >= 0 else { return false }
@@ -54,7 +56,7 @@ final class PtySession {
         return true
     }
 
-    private func readLoop(_ sessionId: Int32) {
+    private nonisolated func readLoop(_ sessionId: Int32) {
         var buffer = [UInt8](repeating: 0, count: 4096)
         var sawAnyOutput = false
 
@@ -79,28 +81,28 @@ final class PtySession {
         }
     }
 
-    func send(_ bytes: ArraySlice<UInt8>) {
+    nonisolated func send(_ bytes: ArraySlice<UInt8>) {
         let id = sessionId
         guard id >= 0 else { return }
         let array = Array(bytes)
         _ = array.withUnsafeBufferPointer { glauk_pty_write(id, $0.baseAddress, $0.count) }
     }
 
-    func resize(rows: Int, cols: Int) {
+    nonisolated func resize(rows: Int, cols: Int) {
         let id = sessionId
         guard id >= 0, rows > 0, cols > 0 else { return }
         _ = glauk_pty_resize(id, UInt16(rows), UInt16(cols))
     }
 
     /// 仕様の「閉じたら必ず終了、常駐させない」を守る唯一の出口。
-    func stop() {
+    nonisolated func stop() {
         let old = sessionId
         guard old >= 0 else { return }
         clearId()
         glauk_pty_kill(old)
     }
 
-    private func clearId() {
+    private nonisolated func clearId() {
         lock.lock(); id = -1; lock.unlock()
     }
 

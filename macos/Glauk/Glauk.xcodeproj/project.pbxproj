@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		7B00000130178E1900900815 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = 7B00000330178E1900900815 /* SwiftTerm */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		0A3237CC30178E1900900815 /* Glauk.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Glauk.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -23,6 +27,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				7B00000130178E1900900815 /* SwiftTerm in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -66,6 +71,7 @@
 			);
 			name = Glauk;
 			packageProductDependencies = (
+				7B00000330178E1900900815 /* SwiftTerm */,
 			);
 			productName = Glauk;
 			productReference = 0A3237CC30178E1900900815 /* Glauk.app */;
@@ -96,6 +102,9 @@
 			mainGroup = 0A3237C330178E1900900815;
 			minimizedProjectReferenceProxies = 1;
 			preferredProjectObjectVersion = 77;
+			packageReferences = (
+				7B00000230178E1900900815 /* XCRemoteSwiftPackageReference "SwiftTerm" */,
+			);
 			productRefGroup = 0A3237CD30178E1900900815 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -345,6 +354,25 @@
 			name = Release;
 		};
 /* End XCBuildConfiguration section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		7B00000230178E1900900815 /* XCRemoteSwiftPackageReference "SwiftTerm" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/migueldeicaza/SwiftTerm";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.20.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		7B00000330178E1900900815 /* SwiftTerm */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 7B00000230178E1900900815 /* XCRemoteSwiftPackageReference "SwiftTerm" */;
+			productName = SwiftTerm;
+		};
+/* End XCSwiftPackageProductDependency section */
 
 /* Begin XCConfigurationList section */
 		0A3237C730178E1900900815 /* Build configuration list for PBXProject "Glauk" */ = {
