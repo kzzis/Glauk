@@ -12,7 +12,7 @@ final class DocumentStore: ObservableObject {
     @Published private(set) var lastError: String?
     /// open() のたびに増える。MarkdownTextView はこれの変化を「差し替え」の合図として使う。
     /// (テキストビューがfirstResponderのままだと通常のbinding経由の更新は無視されるため)
-    @Published private(set) var revision = 0
+    @Published fileprivate(set) var revision = 0
 
     fileprivate var saveTask: Task<Void, Never>?
     fileprivate var suppressAutosave = false
@@ -91,5 +91,55 @@ extension DocumentStore {
     /// 中身はそのままに、書き戻し先だけ付け替える(名前の変更・移動のあと)。
     func rebind(to newPath: String) {
         path = newPath
+    }
+}
+
+extension DocumentStore {
+    struct ReloadResult {
+        let oldText: String
+        let newText: String
+        /// 変わった行の範囲(0始まり)
+        let changedLines: Range<Int>
+    }
+
+    /// 外から書き換えられたので読み直す。中身が同じなら nil。
+    func reloadFromDisk() -> ReloadResult? {
+        guard let path, let fresh = GlaukFile.read(path: path) else { return nil }
+        guard fresh != text else { return nil }
+
+        let old = text
+        let changed = Self.changedLineRange(old: old, new: fresh)
+
+        // ★ リロードで自動保存が走ると、外部の変更を自分が上書きしてしまう
+        suppressAutosave = true
+        text = fresh
+        revision += 1
+        suppressAutosave = false
+
+        return ReloadResult(oldText: old, newText: fresh, changedLines: changed)
+    }
+
+    /// 前後から一致する行を削っていき、残った範囲を「変わった行」とみなす。
+    /// ★ 間に挟まれた無変更行も変更扱いになる。Stage 1 は「どの行が変わったか」
+    ///   だけを見るので、ここは割り切る。
+    static func changedLineRange(old: String, new: String) -> Range<Int> {
+        let oldLines = old.components(separatedBy: "\n")
+        let newLines = new.components(separatedBy: "\n")
+
+        var start = 0
+        while start < oldLines.count, start < newLines.count,
+              oldLines[start] == newLines[start] {
+            start += 1
+        }
+
+        var oldEnd = oldLines.count
+        var newEnd = newLines.count
+        while oldEnd > start, newEnd > start,
+              oldLines[oldEnd - 1] == newLines[newEnd - 1] {
+            oldEnd -= 1
+            newEnd -= 1
+        }
+
+        return start..<max(start, newEnd)
     }
 }
