@@ -19,13 +19,12 @@ pub fn main() !void {
     const cwd_z = try page.dupeZ(u8, cwd);
     defer page.free(cwd_z);
 
-    const id = pty.glauk_pty_spawn(agent, cwd_z.ptr);
+    const id = pty.glauk_pty_spawn(agent, cwd_z.ptr, 40, 120);
     if (id < 0) {
         std.debug.print("spawn failed\n", .{});
         return;
     }
     std.debug.print("spawned session {d} in {s}\n", .{ id, cwd });
-    _ = pty.glauk_pty_resize(id, 40, 120);
 
     // ★ バッファに溜めない。溜めると、相手が黙っている間ずっと画面に何も出ない。
     //   端末に直接書く。

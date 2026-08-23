@@ -32,6 +32,11 @@ final class PtySession {
     ///   Zig 側の表は Mutex で守られていて、知らないIDには安全に失敗するので、
     ///   ここは並行性チェックの外に置く。
     private nonisolated(unsafe) var id: Int32 = -1
+    /// ★ 画面の大きさは起動より前に届く(SwiftTerm はレイアウト時に sizeChanged を
+    ///   投げ、そのとき PTY はまだ無い)。覚えておいて起動時に渡さないと、
+    ///   CLI が 80桁で最初の1画面を描いてしまい、折り返しが崩れたまま残る。
+    private nonisolated(unsafe) var lastRows: Int = 24
+    private nonisolated(unsafe) var lastCols: Int = 80
     private let lock = NSLock()
 
     nonisolated var sessionId: Int32 {
@@ -45,7 +50,13 @@ final class PtySession {
     @discardableResult
     nonisolated func start(agent: AgentKind, cwd: String) -> Bool {
         stop()
-        let newId = cwd.withCString { glauk_pty_spawn(agent.rawValue, $0) }
+        lock.lock()
+        let rows = lastRows
+        let cols = lastCols
+        lock.unlock()
+        let newId = cwd.withCString {
+            glauk_pty_spawn(agent.rawValue, $0, UInt16(rows), UInt16(cols))
+        }
         guard newId >= 0 else { return false }
         lock.lock(); id = newId; lock.unlock()
 
@@ -97,8 +108,13 @@ final class PtySession {
     }
 
     nonisolated func resize(rows: Int, cols: Int) {
-        let id = sessionId
-        guard id >= 0, rows > 0, cols > 0 else { return }
+        guard rows > 0, cols > 0 else { return }
+        lock.lock()
+        lastRows = rows
+        lastCols = cols
+        let id = self.id
+        lock.unlock()
+        guard id >= 0 else { return }   // まだ起動していなければ覚えるだけ
         _ = glauk_pty_resize(id, UInt16(rows), UInt16(cols))
     }
 

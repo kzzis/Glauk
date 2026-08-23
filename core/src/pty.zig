@@ -32,7 +32,9 @@ pub const Agent = enum(c_int) {
 };
 
 /// エージェントCLIを新しいPTY上で起動する。セッションIDを返す。失敗なら -1。
-pub export fn glauk_pty_spawn(agent: c_int, cwd: [*:0]const u8) callconv(.c) i32 {
+/// ★ 大きさは起動時に渡す。あとから resize する形にすると、CLI は最初の
+///   1画面を 80桁で描いてしまい、折り返しが崩れたまま残る。
+pub export fn glauk_pty_spawn(agent: c_int, cwd: [*:0]const u8, rows: u16, cols: u16) callconv(.c) i32 {
     // ★ 先に検査する。@enumFromInt に知らない値を渡すと安全モードで落ちる。
     //   Swift 側の書き間違いがアプリごと落とす事故になりうる。
     if (agent != @intFromEnum(Agent.claude) and agent != @intFromEnum(Agent.codex)) {
@@ -47,8 +49,8 @@ pub export fn glauk_pty_spawn(agent: c_int, cwd: [*:0]const u8) callconv(.c) i32
 
     var master: c_int = -1;
     var ws: c.struct_winsize = .{
-        .ws_row = 24,
-        .ws_col = 80,
+        .ws_row = if (rows > 0) rows else 24,
+        .ws_col = if (cols > 0) cols else 80,
         .ws_xpixel = 0,
         .ws_ypixel = 0,
     };
@@ -234,6 +236,6 @@ test "知らないIDをkillしても落ちない" {
 
 test "知らないエージェント番号はspawnせず -1 を返す" {
     // @enumFromInt に落ちる前に弾けているか
-    try testing.expectEqual(@as(i32, -1), glauk_pty_spawn(42, "/tmp"));
+    try testing.expectEqual(@as(i32, -1), glauk_pty_spawn(42, "/tmp", 24, 80));
     try testing.expectEqual(@as(usize, 0), glauk_pty_session_count());
 }
