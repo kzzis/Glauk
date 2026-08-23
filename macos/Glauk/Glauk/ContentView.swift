@@ -161,6 +161,13 @@ struct ContentView: View {
             iconButton("square.and.pencil", help: "新規ファイル…") { document.createWithPanel() }
             iconButton("folder", help: "ファイルを開く (⇧⌘O)") { document.openWithPanel() }
 
+            Divider().frame(height: 14).padding(.horizontal, 4)
+
+            // 開いている間は色を付けて、いま出ていることが分かるようにする
+            iconButton("terminal",
+                       help: showAgent ? "AIペインを隠す (⌘J)" : "AIペインを出す (⌘J)",
+                       active: showAgent) { toggleAgent() }
+
             // 仕様書の「UIクロームは無彩色」に従い、現在地はノート名だけ出す
             if let name = navigator.currentName {
                 Text(name)
@@ -190,11 +197,15 @@ struct ContentView: View {
     private func iconButton(_ symbol: String,
                             help: String,
                             enabled: Bool = true,
+                            active: Bool = false,
                             action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.system(size: 13))
+                .foregroundStyle(active ? Color.accentColor : Color.primary)
                 .frame(width: 26, height: 22)
+                .background(active ? Color.accentColor.opacity(0.15) : .clear,
+                            in: RoundedRectangle(cornerRadius: 5))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.borderless)
