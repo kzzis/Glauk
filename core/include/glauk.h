@@ -38,6 +38,12 @@ int32_t glauk_pty_poll(int32_t id, int32_t timeout_ms);  // 1=読める, 0=時�
 void    glauk_pty_kill(int32_t id);
 size_t  glauk_pty_session_count(void);
 
+// --- watch ---
+// 外部からの変更があるまでブロックする。true=外部変更 / false=監視できない。
+// 自分(glauk_write_file)の書き込みは握りつぶされる。
+bool glauk_watch_next_external_change(const char* path);
+void glauk_mark_self_write(void);
+
 // --- 共通 ---
 void glauk_free_buffer(uint8_t* ptr, size_t len);
 bool glauk_check_leaks(void);
