@@ -43,6 +43,12 @@ final class AgentPaneController: NSObject, ObservableObject {
         //   ここで公開されていない内部APIを覗きに行かない。
     }
 
+    /// ★ ペインを出しただけでは本文の NSTextView がフォーカスを持ったまま。
+    ///   打った文字がエディタに入ってしまい「対話できない」ように見える。
+    func focusTerminal() {
+        terminalView.window?.makeFirstResponder(terminalView)
+    }
+
     func stop() {
         pty.stop()
         isRunning = false

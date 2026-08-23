@@ -66,7 +66,12 @@ struct ContentView: View {
 
                 if showAgent, let agent {
                     Divider()
-                    agentPane(agent).frame(width: 420)
+                    AgentPaneBody(controller: agent,
+                                  selectedAgent: $defaultAgent,
+                                  onSwitch: { kind in
+                                      agent.start(agent: kind, cwd: workingDirectory)
+                                  })
+                        .frame(width: 420)
                 }
             }
         }
@@ -238,42 +243,6 @@ struct ContentView: View {
 
     // MARK: - AIペイン
 
-    @ViewBuilder
-    private func agentPane(_ agent: AgentPaneController) -> some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text("Agent").font(.system(size: 11)).foregroundStyle(.secondary)
-                Spacer()
-                Picker("", selection: $defaultAgent) {
-                    ForEach(AgentKind.allCases) { kind in
-                        Text(kind.displayName).tag(Int(kind.rawValue))
-                    }
-                }
-                .pickerStyle(.menu)
-                .labelsHidden()
-                .frame(width: 130)
-                .onChange(of: defaultAgent) { _, newValue in
-                    // 切り替えは作り直し。同じ会話は引き継げない。
-                    guard showAgent else { return }
-                    agent.start(agent: AgentKind(rawValue: Int32(newValue)) ?? .claude,
-                                cwd: workingDirectory)
-                }
-            }
-            .padding(.horizontal, 10)
-            .frame(height: 28)
-            Divider()
-            AgentPaneView(controller: agent)
-            if let message = agent.errorMessage {
-                Divider()
-                Text(message)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(8)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-    }
-
     private func toggleAgent() {
         if showAgent {
             agent?.stop()          // ★ 仕様: 閉じたら必ず終了。常駐させない
@@ -285,6 +254,8 @@ struct ContentView: View {
         showAgent = true
         controller.start(agent: AgentKind(rawValue: Int32(defaultAgent)) ?? .claude,
                          cwd: workingDirectory)
+        // 出した直後に打てるようにする
+        DispatchQueue.main.async { controller.focusTerminal() }
     }
 
     /// 開いているファイルのディレクトリ。未保存ならホーム。

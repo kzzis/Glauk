@@ -101,10 +101,10 @@
 			);
 			mainGroup = 0A3237C330178E1900900815;
 			minimizedProjectReferenceProxies = 1;
-			preferredProjectObjectVersion = 77;
 			packageReferences = (
 				7B00000230178E1900900815 /* XCRemoteSwiftPackageReference "SwiftTerm" */,
 			);
+			preferredProjectObjectVersion = 77;
 			productRefGroup = 0A3237CD30178E1900900815 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -355,25 +355,6 @@
 		};
 /* End XCBuildConfiguration section */
 
-/* Begin XCRemoteSwiftPackageReference section */
-		7B00000230178E1900900815 /* XCRemoteSwiftPackageReference "SwiftTerm" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/migueldeicaza/SwiftTerm";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 1.20.0;
-			};
-		};
-/* End XCRemoteSwiftPackageReference section */
-
-/* Begin XCSwiftPackageProductDependency section */
-		7B00000330178E1900900815 /* SwiftTerm */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 7B00000230178E1900900815 /* XCRemoteSwiftPackageReference "SwiftTerm" */;
-			productName = SwiftTerm;
-		};
-/* End XCSwiftPackageProductDependency section */
-
 /* Begin XCConfigurationList section */
 		0A3237C730178E1900900815 /* Build configuration list for PBXProject "Glauk" */ = {
 			isa = XCConfigurationList;
@@ -394,6 +375,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		7B00000230178E1900900815 /* XCRemoteSwiftPackageReference "SwiftTerm" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/migueldeicaza/SwiftTerm";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.20.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		7B00000330178E1900900815 /* SwiftTerm */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 7B00000230178E1900900815 /* XCRemoteSwiftPackageReference "SwiftTerm" */;
+			productName = SwiftTerm;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 0A3237C430178E1900900815 /* Project object */;
 }
