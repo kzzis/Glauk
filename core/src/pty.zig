@@ -39,6 +39,19 @@ pub export fn glauk_pty_spawn(agent: c_int, cwd: [*:0]const u8) callconv(.c) i32
         return -1;
     }
 
+    // ★ fork の前にログインシェルを控える。
+    //   GUI アプリが受け取る PATH は /usr/bin:/bin:/usr/sbin:/sbin だけで、
+    //   Homebrew(/opt/homebrew/bin)も ~/.local/bin も入っていない。
+    //   execvp("claude") は素通しでは必ず失敗する。
+    //   ログインシェル越しに起動すると、ユーザーの設定が読まれて
+    //   ターミナルで打ったときと同じ PATH になる。端末アプリの定石。
+    var shell_buf: [512]u8 = undefined;
+    const shell_env = std.posix.getenv("SHELL") orelse "/bin/zsh";
+    if (shell_env.len + 1 > shell_buf.len) return -1;
+    @memcpy(shell_buf[0..shell_env.len], shell_env);
+    shell_buf[shell_env.len] = 0;
+    const shell_z: [*:0]const u8 = @ptrCast(&shell_buf);
+
     var master: c_int = -1;
     var ws: c.struct_winsize = .{
         .ws_row = 24,
@@ -59,16 +72,26 @@ pub export fn glauk_pty_spawn(agent: c_int, cwd: [*:0]const u8) callconv(.c) i32
     if (pid == 0) {
         // ---- ここから子プロセス ----
         if (c.chdir(cwd) != 0) c._exit(126); // 移動できない
-        switch (@as(Agent, @enumFromInt(agent))) {
-            .claude => {
-                const argv = [_:null]?[*:0]const u8{ "claude", null };
-                _ = c.execvp("claude", @constCast(@ptrCast(&argv)));
-            },
-            .codex => {
-                const argv = [_:null]?[*:0]const u8{ "codex", "--cd", cwd, null };
-                _ = c.execvp("codex", @constCast(@ptrCast(&argv)));
-            },
-        }
+
+        // cwd は上で移動済みなので、コマンドは名前だけでよい
+        const kind = @as(Agent, @enumFromInt(agent));
+        const command: [*:0]const u8 = switch (kind) {
+            .claude => "exec claude",
+            .codex => "exec codex",
+        };
+        // ★ -i まで付ける。zsh は .zshrc を「対話シェルのとき」しか読まない。
+        //   実測: -l -c だと /opt/homebrew/bin の claude しか見つからず、
+        //   ~/.local/bin の codex は見つからなかった。-l -i -c なら両方通る。
+        const shell_argv = [_:null]?[*:0]const u8{ shell_z, "-l", "-i", "-c", command, null };
+        _ = c.execvp(shell_z, @constCast(@ptrCast(&shell_argv)));
+
+        // シェルが起動できなかったときの保険。PATH に入っていれば拾える。
+        const name: [*:0]const u8 = switch (kind) {
+            .claude => "claude",
+            .codex => "codex",
+        };
+        const direct = [_:null]?[*:0]const u8{ name, null };
+        _ = c.execvp(name, @constCast(@ptrCast(&direct)));
         // ★ execvp は成功したら戻ってこない(中身が入れ替わる)。
         //   ここに来たのは失敗したときだけ。127 は「コマンドが無い」の慣習。
         //   exit ではなく _exit。exit だと親から引き継いだバッファを流して

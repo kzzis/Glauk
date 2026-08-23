@@ -61,7 +61,7 @@ final class AgentPaneController: NSObject, ObservableObject {
         if !sawAnyOutput {
             // ★ CLI が PATH に無いと、子が execvp に失敗して _exit(127) し、
             //   1バイトも出さずに EOF になる。これを起動失敗の合図として使う。
-            errorMessage = "CLI が見つかりません。`claude` / `codex` が PATH にあるか確認してください"
+            errorMessage = "CLI が見つかりません。ターミナルで `which claude` が通るか確認してください"
         }
     }
 }
