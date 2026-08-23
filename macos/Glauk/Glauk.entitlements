@@ -2,14 +2,21 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>com.apple.security.app-sandbox</key>
-	<true/>
-	<key>com.apple.security.files.user-selected.read-write</key>
-	<true/>
-	<!-- ノートフォルダを次回起動時も覚えておくために必要。
-	     これが無いと bookmarkData(options: .withSecurityScope) が失敗し、
-	     毎回フォルダを選び直すことになる。 -->
-	<key>com.apple.security.files.bookmarks.app-scope</key>
-	<true/>
+	<!-- App Sandbox は使わない。
+
+	     AIペインは PTY の上で claude / codex を起動する。それらは
+	     ~/.local/bin や /opt/homebrew/bin にあり、サンドボックス下では
+	     読むことも実行することもできない。ユーザーが選んだファイル以外に
+	     触れないのがサンドボックスの本体なので、任意の CLI を起動する
+	     機能とは両立しない。
+
+	     glauk-design-doc の差別化の核②(AIペイン)を取る判断。
+	     step10 の「MVPではサンドボックスを無効にする」を前倒しで適用した。
+	     配布は GitHub Releases を想定していて、Mac App Store には出さない。
+
+	     サンドボックスを外したので、ノートフォルダの
+	     セキュリティスコープ付きブックマークは不要になったが、
+	     将来また有効にする可能性を考えてコードは残してある。
+	     (作成に失敗しても普通のパスで動くようにしてある) -->
 </dict>
 </plist>
