@@ -8,6 +8,8 @@ struct ContentView: View {
     /// ノート間の移動は全部ここを通す。ContentView は入口を並べるだけにする。
     @StateObject private var navigator: NoteNavigator
     @State private var showSwitcher = false
+    /// 外部からの書き換えを見張る。AIエージェントや Obsidian の編集に気づくため。
+    @StateObject private var watcher = FileWatcher()
     /// ★ 開くまで作らない。常に生成すると SwiftTerm の初期化コストが
     ///   ⌥Space の出現時間(p95 < 300ms)に乗ってしまう。
     @State private var agent: AgentPaneController?
@@ -125,6 +127,22 @@ struct ContentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .glaukToggleAgent)) { _ in
             toggleAgent()
+        }
+        .onAppear {
+            watcher.onExternalChange = { _ in
+                guard let result = document.reloadFromDisk() else { return }
+                // Step 8b でここに「にじみ」を入れる
+                #if DEBUG
+                print("[watch] 読み直した / 変わった行 \(result.changedLines)")
+                #endif
+            }
+            // ★ .onChange は最初の値では発火しない。起動時に既に開いていた
+            //   ファイルを見張り始めるために、ここでも1度呼ぶ。
+            watcher.watch(path: document.path)
+        }
+        // 開いているノートが変わったら見張る先も変える
+        .onChange(of: document.path) { _, newPath in
+            watcher.watch(path: newPath)
         }
         // 起動時
         .task { await noteIndex.refresh(root: notesFolder.root) }
