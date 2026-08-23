@@ -70,6 +70,13 @@ pub export fn glauk_pty_spawn(agent: c_int, cwd: [*:0]const u8) callconv(.c) i32
         //   PTY の中で対話シェルを走らせると、ジョブ制御が使えず
         //   「can't set tty pgrp」を出すうえ、.zshrc の出力も混ざる。
         _ = c.setenv("PATH", path_z, 1);
+        // ★ GUI アプリの環境には TERM が無い(あっても "dumb")。
+        //   codex は「TERM が dumb なら対話UIを出さない」と明示的に拒否する。
+        //   ここは本物の PTY なので、色と機能を持つ端末名を名乗る。
+        _ = c.setenv("TERM", "xterm-256color", 1);
+        _ = c.setenv("COLORTERM", "truecolor", 1);
+        // 文字化けを避ける。既にあれば尊重する(第3引数 0 = 上書きしない)。
+        _ = c.setenv("LANG", "en_US.UTF-8", 0);
 
         const kind = @as(Agent, @enumFromInt(agent));
         const name: [*:0]const u8 = switch (kind) {

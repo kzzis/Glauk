@@ -69,14 +69,22 @@ final class PtySession {
             let chunk = Array(buffer[0..<Int(n)])
             // ★ 受け手は画面を触るので必ずメインスレッドへ戻す。
             //   AppKit はスレッド安全ではなく、忘れると「動くけど時々落ちる」になる。
-            DispatchQueue.main.async { [weak self] in self?.onOutput?(chunk[...]) }
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                // ★ 既に読んでしまった分がメインスレッドの順番待ちに残っている。
+                //   エージェントを切り替えた後にそれが流れると、前の会話と
+                //   新しい会話が同じ画面に混ざる。今のセッションの分だけ通す。
+                guard self.sessionId == sessionId else { return }
+                self.onOutput?(chunk[...])
+            }
         }
 
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            // 自分が畳んだ後の EOF なら黙って終わる
-            let wasCurrent = self.sessionId == sessionId
-            if wasCurrent { self.clearId() }
+            // 自分が畳んだ後、あるいは切り替えた後の EOF なら黙って終わる。
+            // 通すと、新しく起動したセッションが「終了した」ことにされてしまう。
+            guard self.sessionId == sessionId else { return }
+            self.clearId()
             self.onExit?(sawAnyOutput)
         }
     }

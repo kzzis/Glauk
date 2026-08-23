@@ -30,6 +30,9 @@ final class AgentPaneController: NSObject, ObservableObject {
 
     func start(agent: AgentKind, cwd: String) {
         errorMessage = nil
+        // ★ 前の会話を消してから始める。切り替えは作り直しなので、
+        //   残っていると2つの会話が同じ画面に並んでいるように見える。
+        clearScreen()
         guard pty.start(agent: agent, cwd: cwd) else {
             errorMessage = "エージェントを起動できませんでした"
             isRunning = false
@@ -41,6 +44,13 @@ final class AgentPaneController: NSObject, ObservableObject {
         // ★ 起動直後の大きさは spawn 側の 24x80 のまま。SwiftTerm がレイアウトの
         //   たびに sizeChanged を投げてくるので、そこで実寸に直る。
         //   ここで公開されていない内部APIを覗きに行かない。
+    }
+
+    /// 画面を消す。SwiftTerm に「まっさらに戻す」APIは無いので、
+    /// 端末に向けて消去のエスケープを流す(どの版でも通る)。
+    private func clearScreen() {
+        terminalView.clearScrollback()
+        terminalView.feed(text: "\u{1b}[H\u{1b}[2J")
     }
 
     /// ★ ペインを出しただけでは本文の NSTextView がフォーカスを持ったまま。
