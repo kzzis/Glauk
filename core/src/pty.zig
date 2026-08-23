@@ -8,6 +8,7 @@ const std = @import("std");
 const c = @cImport({
     @cInclude("util.h"); // forkpty
     @cInclude("unistd.h"); // chdir, execvp, _exit
+    @cInclude("stdlib.h"); // setenv
     @cInclude("signal.h"); // kill
     @cInclude("sys/ioctl.h"); // TIOCSWINSZ
     @cInclude("poll.h"); // poll
@@ -39,18 +40,10 @@ pub export fn glauk_pty_spawn(agent: c_int, cwd: [*:0]const u8) callconv(.c) i32
         return -1;
     }
 
-    // ★ fork の前にログインシェルを控える。
+    // ★ fork の前に、ユーザーの PATH を1度だけ調べておく。
     //   GUI アプリが受け取る PATH は /usr/bin:/bin:/usr/sbin:/sbin だけで、
-    //   Homebrew(/opt/homebrew/bin)も ~/.local/bin も入っていない。
-    //   execvp("claude") は素通しでは必ず失敗する。
-    //   ログインシェル越しに起動すると、ユーザーの設定が読まれて
-    //   ターミナルで打ったときと同じ PATH になる。端末アプリの定石。
-    var shell_buf: [512]u8 = undefined;
-    const shell_env = std.posix.getenv("SHELL") orelse "/bin/zsh";
-    if (shell_env.len + 1 > shell_buf.len) return -1;
-    @memcpy(shell_buf[0..shell_env.len], shell_env);
-    shell_buf[shell_env.len] = 0;
-    const shell_z: [*:0]const u8 = @ptrCast(&shell_buf);
+    //   Homebrew も ~/.local/bin も入っていない。素の execvp は必ず失敗する。
+    const path_z = resolvedUserPath();
 
     var master: c_int = -1;
     var ws: c.struct_winsize = .{
@@ -73,25 +66,18 @@ pub export fn glauk_pty_spawn(agent: c_int, cwd: [*:0]const u8) callconv(.c) i32
         // ---- ここから子プロセス ----
         if (c.chdir(cwd) != 0) c._exit(126); // 移動できない
 
-        // cwd は上で移動済みなので、コマンドは名前だけでよい
-        const kind = @as(Agent, @enumFromInt(agent));
-        const command: [*:0]const u8 = switch (kind) {
-            .claude => "exec claude",
-            .codex => "exec codex",
-        };
-        // ★ -i まで付ける。zsh は .zshrc を「対話シェルのとき」しか読まない。
-        //   実測: -l -c だと /opt/homebrew/bin の claude しか見つからず、
-        //   ~/.local/bin の codex は見つからなかった。-l -i -c なら両方通る。
-        const shell_argv = [_:null]?[*:0]const u8{ shell_z, "-l", "-i", "-c", command, null };
-        _ = c.execvp(shell_z, @constCast(@ptrCast(&shell_argv)));
+        // ★ 調べておいた PATH を child に渡してから直接起動する。
+        //   PTY の中で対話シェルを走らせると、ジョブ制御が使えず
+        //   「can't set tty pgrp」を出すうえ、.zshrc の出力も混ざる。
+        _ = c.setenv("PATH", path_z, 1);
 
-        // シェルが起動できなかったときの保険。PATH に入っていれば拾える。
+        const kind = @as(Agent, @enumFromInt(agent));
         const name: [*:0]const u8 = switch (kind) {
             .claude => "claude",
             .codex => "codex",
         };
-        const direct = [_:null]?[*:0]const u8{ name, null };
-        _ = c.execvp(name, @constCast(@ptrCast(&direct)));
+        const argv = [_:null]?[*:0]const u8{ name, null };
+        _ = c.execvp(name, @constCast(@ptrCast(&argv)));
         // ★ execvp は成功したら戻ってこない(中身が入れ替わる)。
         //   ここに来たのは失敗したときだけ。127 は「コマンドが無い」の慣習。
         //   exit ではなく _exit。exit だと親から引き継いだバッファを流して
@@ -110,6 +96,50 @@ pub export fn glauk_pty_spawn(agent: c_int, cwd: [*:0]const u8) callconv(.c) i32
     };
     next_id += 1;
     return id;
+}
+
+/// ユーザーのシェルが持っている PATH。初回だけ調べて覚える。
+var user_path_buf: [4096]u8 = undefined;
+var user_path_ready = false;
+var user_path_lock: std.Thread.Mutex = .{};
+
+/// ★ ログインかつ対話のシェルに聞く。zsh は .zshrc を「対話シェルのとき」しか
+///   読まず、~/.local/bin はそこで足されていることが多い。
+///   実測(GUIと同じ最小PATHで): -l -c だと /opt/homebrew/bin しか見えず、
+///   -l -i -c で ~/.local/bin まで入る。
+fn resolvedUserPath() [*:0]const u8 {
+    user_path_lock.lock();
+    defer user_path_lock.unlock();
+    if (user_path_ready) return @ptrCast(&user_path_buf);
+
+    // 失敗したときのために、まず今の PATH を入れておく
+    const current = std.posix.getenv("PATH") orelse "/usr/bin:/bin";
+    const fallback_len = @min(current.len, user_path_buf.len - 1);
+    @memcpy(user_path_buf[0..fallback_len], current[0..fallback_len]);
+    user_path_buf[fallback_len] = 0;
+    user_path_ready = true;
+
+    const shell = std.posix.getenv("SHELL") orelse "/bin/zsh";
+    var probe_state: std.heap.DebugAllocator(.{}) = .init;
+    defer _ = probe_state.deinit();
+    const probe = probe_state.allocator();
+
+    const result = std.process.Child.run(.{
+        .allocator = probe,
+        .argv = &.{ shell, "-l", "-i", "-c", "printf %s \"$PATH\"" },
+        .max_output_bytes = user_path_buf.len - 1,
+    }) catch |err| {
+        std.debug.print("[glauk] PATH を調べられませんでした: {s}\n", .{@errorName(err)});
+        return @ptrCast(&user_path_buf);
+    };
+    defer probe.free(result.stdout);
+    defer probe.free(result.stderr);
+
+    const found = std.mem.trim(u8, result.stdout, " \t\r\n");
+    if (found.len == 0 or found.len >= user_path_buf.len) return @ptrCast(&user_path_buf);
+    @memcpy(user_path_buf[0..found.len], found);
+    user_path_buf[found.len] = 0;
+    return @ptrCast(&user_path_buf);
 }
 
 fn lookup(id: i32) ?Session {
