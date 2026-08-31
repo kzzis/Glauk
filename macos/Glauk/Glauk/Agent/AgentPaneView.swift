@@ -25,9 +25,20 @@ struct AgentPaneBody: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Text("Agent").font(.system(size: 11)).foregroundStyle(.secondary)
-                Spacer()
+            HStack(spacing: 6) {
+                // ★ エージェントに渡してあるファイルを常に見せる。入力欄を
+                //   差し替えられない場面(既に打ち始めている)でも、どれを指して
+                //   いるつもりなのかがここで分かる。
+                Image(systemName: "doc.text")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                Text(controller.contextFile ?? "未保存")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.head)
+                    .help(controller.contextFile ?? "まだ保存されていないノート")
+                Spacer(minLength: 4)
                 Picker("", selection: $selectedAgent) {
                     ForEach(AgentKind.allCases) { kind in
                         Text(kind.displayName).tag(Int(kind.rawValue))

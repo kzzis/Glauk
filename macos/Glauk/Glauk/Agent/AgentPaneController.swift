@@ -25,6 +25,14 @@ final class AgentPaneController: NSObject, ObservableObject {
     private var seedTask: Task<Void, Never>?
     /// ずっと描き続ける CLI で永久に差し込まれないのを防ぐ打ち切り時刻。
     private var seedDeadline: Date?
+    /// いま入力欄に入っている、こちらが打った分。消すときの文字数もここから数える。
+    private var insertedSeed: String?
+    /// ★ 差し込んだあとに人が1文字でも打ったら、以降は入力欄に触らない。
+    ///   書きかけを黙って消される方が、古いファイル名が残るよりずっと困る。
+    ///   SwiftTerm のデリゲートは隔離の外から来るので nonisolated で持つ。
+    private nonisolated(unsafe) var userTypedSinceSeed = false
+    /// ヘッダに出す「いまエージェントに渡してあるファイル」。
+    @Published private(set) var contextFile: String?
 
     override init() {
         terminalView = TerminalView(frame: NSRect(x: 0, y: 0, width: 420, height: 400), font: nil)
@@ -48,7 +56,10 @@ final class AgentPaneController: NSObject, ObservableObject {
         //   残っていると2つの会話が同じ画面に並んでいるように見える。
         clearScreen()
         cancelSeed()
+        insertedSeed = nil
+        userTypedSinceSeed = false
         pendingSeed = activeFile.map { "@\($0) " }
+        contextFile = activeFile
         guard pty.start(agent: agent, cwd: cwd) else {
             errorMessage = "エージェントを起動できませんでした"
             isRunning = false
@@ -77,6 +88,8 @@ final class AgentPaneController: NSObject, ObservableObject {
 
     func stop() {
         cancelSeed()
+        insertedSeed = nil
+        contextFile = nil
         pty.stop()
         isRunning = false
         runningAgent = nil
@@ -102,7 +115,9 @@ final class AgentPaneController: NSObject, ObservableObject {
     private func flushSeed() {
         guard let seed = pendingSeed else { return }
         cancelSeed()
+        userTypedSinceSeed = false
         pty.send(ArraySlice(Array(seed.utf8)))
+        insertedSeed = seed
     }
 
     private func cancelSeed() {
@@ -110,6 +125,39 @@ final class AgentPaneController: NSObject, ObservableObject {
         seedTask?.cancel()
         seedTask = nil
         seedDeadline = nil
+    }
+
+    /// 開いているノートが変わった。入力欄のファイル名を差し替える。
+    ///
+    /// ★ 差し替えられるのは「まだ人が何も打っていない」ときだけ。自分が打った
+    ///   ぶんの文字数しか消さないので、書きかけを巻き込むことはない。
+    ///   打ち始めていたら何もしない — ヘッダの表示だけが新しいファイルを指す。
+    func followActiveFile(_ relativePath: String?) {
+        let seed = relativePath.map { "@\($0) " }
+
+        // まだ差し込んでいない(CLI の起動中)なら、送る中身を入れ替えるだけでよい。
+        if pendingSeed != nil {
+            pendingSeed = seed
+            contextFile = relativePath
+            return
+        }
+        guard isRunning, !userTypedSinceSeed else { return }
+        guard seed != insertedSeed else { return }
+
+        eraseInsertedSeed()
+        if let seed {
+            pty.send(ArraySlice(Array(seed.utf8)))
+            insertedSeed = seed
+        }
+        contextFile = relativePath
+    }
+
+    /// 自分が打った分だけ後退で消す。DEL を文字数ぶん送る。
+    private func eraseInsertedSeed() {
+        guard let old = insertedSeed, !old.isEmpty else { return }
+        let deletes = [UInt8](repeating: 0x7f, count: old.count)
+        pty.send(deletes[...])
+        insertedSeed = nil
     }
 
     private func handleExit(sawAnyOutput: Bool) {
@@ -128,6 +176,7 @@ final class AgentPaneController: NSObject, ObservableObject {
 extension AgentPaneController: TerminalViewDelegate {
     /// ユーザーのキー入力 → PTY へ
     nonisolated func send(source: TerminalView, data: ArraySlice<UInt8>) {
+        userTypedSinceSeed = true
         pty.send(data)
     }
 

@@ -145,6 +145,8 @@ struct ContentView: View {
         // 開いているノートが変わったら見張る先も変える
         .onChange(of: document.path) { _, newPath in
             watcher.watch(path: newPath)
+            // AIペインにも今どれを見ているかを伝える
+            agent?.followActiveFile(activeFileForAgent)
         }
         // 起動時
         .task { await noteIndex.refresh(root: notesFolder.root) }
