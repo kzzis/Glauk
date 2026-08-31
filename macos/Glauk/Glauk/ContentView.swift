@@ -71,7 +71,9 @@ struct ContentView: View {
                     AgentPaneBody(controller: agent,
                                   selectedAgent: $defaultAgent,
                                   onSwitch: { kind in
-                                      agent.start(agent: kind, cwd: workingDirectory)
+                                      agent.start(agent: kind,
+                                                  cwd: workingDirectory,
+                                                  activeFile: activeFileForAgent)
                                   })
                         .frame(width: 420)
                 }
@@ -271,16 +273,32 @@ struct ContentView: View {
         agent = controller
         showAgent = true
         controller.start(agent: AgentKind(rawValue: Int32(defaultAgent)) ?? .claude,
-                         cwd: workingDirectory)
+                         cwd: workingDirectory,
+                         activeFile: activeFileForAgent)
         // 出した直後に打てるようにする
         DispatchQueue.main.async { controller.focusTerminal() }
     }
 
-    /// 開いているファイルのディレクトリ。未保存ならホーム。
+    /// エージェントを走らせる場所。
+    /// ★ 仕様は「開いているファイルのディレクトリ」だが、vault が決まっているなら
+    ///   その根を使う。ペインを出したままノートを渡り歩くと、cwd はすぐ古くなる。
+    ///   会話を殺さずに追随させる方法が無いので、最初から vault 全体を見せておく。
     /// ★ / や /tmp にすると、エージェントが変な場所を触りかねない。
     private var workingDirectory: String {
+        if let root = notesFolder.root, !root.isEmpty { return root }
         guard let path = document.path else { return NSHomeDirectory() }
         return (path as NSString).deletingLastPathComponent
+    }
+
+    /// 開いているファイルの、cwd から見た相対パス。未保存なら nil。
+    private var activeFileForAgent: String? {
+        guard let path = document.path, !path.isEmpty else { return nil }
+        let root = workingDirectory
+        guard path.hasPrefix(root + "/") else {
+            // vault の外を開いている。絶対パスなら確実に届く。
+            return path
+        }
+        return String(path.dropFirst(root.count + 1))
     }
 
     // MARK: - ツリーからのファイル操作

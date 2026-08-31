@@ -16,23 +16,39 @@ final class AgentPaneController: NSObject, ObservableObject {
     @Published private(set) var errorMessage: String?
     @Published private(set) var runningAgent: AgentKind?
 
+    /// 起動直後に入力欄へ差し込む文字列(まだ送っていない分)。
+    /// ★ cwd だけでは「このファイル」が通じない。フォルダには .md が何枚もあり、
+    ///   エージェントはどれを指しているのか分からない。開いているファイルの
+    ///   名前を、人が打つのと同じ経路で最初に入れておく。改行は送らない。
+    private var pendingSeed: String?
+    /// CLI が黙ってから差し込むための遅延。出力が来るたびに引き直す。
+    private var seedTask: Task<Void, Never>?
+    /// ずっと描き続ける CLI で永久に差し込まれないのを防ぐ打ち切り時刻。
+    private var seedDeadline: Date?
+
     override init() {
         terminalView = TerminalView(frame: NSRect(x: 0, y: 0, width: 420, height: 400), font: nil)
         super.init()
         terminalView.terminalDelegate = self
         pty.onOutput = { [weak self] chunk in
-            self?.terminalView.feed(byteArray: chunk)
+            guard let self else { return }
+            self.terminalView.feed(byteArray: chunk)
+            self.scheduleSeed()
         }
         pty.onExit = { [weak self] sawAnyOutput in
             self?.handleExit(sawAnyOutput: sawAnyOutput)
         }
     }
 
-    func start(agent: AgentKind, cwd: String) {
+    /// - Parameter activeFile: 開いているファイルの、cwd から見た相対パス。
+    ///   未保存なら nil。入力欄の先頭に `@名前 ` として差し込む。
+    func start(agent: AgentKind, cwd: String, activeFile: String?) {
         errorMessage = nil
         // ★ 前の会話を消してから始める。切り替えは作り直しなので、
         //   残っていると2つの会話が同じ画面に並んでいるように見える。
         clearScreen()
+        cancelSeed()
+        pendingSeed = activeFile.map { "@\($0) " }
         guard pty.start(agent: agent, cwd: cwd) else {
             errorMessage = "エージェントを起動できませんでした"
             isRunning = false
@@ -60,9 +76,40 @@ final class AgentPaneController: NSObject, ObservableObject {
     }
 
     func stop() {
+        cancelSeed()
         pty.stop()
         isRunning = false
         runningAgent = nil
+    }
+
+    // MARK: - 開いているファイルを伝える
+
+    /// 出力が来るたびに呼ばれ、静かになったところで1度だけ差し込む。
+    /// ★ 起動直後に送っても、CLI がまだ入力欄を用意しておらず捨てられる。
+    ///   「最後の出力から少し経った = 描き終わった」を合図に使う。
+    private func scheduleSeed() {
+        guard pendingSeed != nil else { return }
+        if seedDeadline == nil { seedDeadline = Date().addingTimeInterval(5) }
+        seedTask?.cancel()
+        let quiet = min(0.7, max(0.05, seedDeadline?.timeIntervalSinceNow ?? 0.7))
+        seedTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(quiet))
+            guard !Task.isCancelled else { return }
+            self?.flushSeed()
+        }
+    }
+
+    private func flushSeed() {
+        guard let seed = pendingSeed else { return }
+        cancelSeed()
+        pty.send(ArraySlice(Array(seed.utf8)))
+    }
+
+    private func cancelSeed() {
+        pendingSeed = nil
+        seedTask?.cancel()
+        seedTask = nil
+        seedDeadline = nil
     }
 
     private func handleExit(sawAnyOutput: Bool) {
