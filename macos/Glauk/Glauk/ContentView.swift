@@ -10,6 +10,12 @@ struct ContentView: View {
     @State private var showSwitcher = false
     /// 外部からの書き換えを見張る。AIエージェントや Obsidian の編集に気づくため。
     @StateObject private var watcher = FileWatcher()
+    /// ★ 開くまで作らない。常に生成すると SwiftTerm の初期化コストが
+    ///   ⌥Space の出現時間(p95 < 300ms)に乗ってしまう。
+    @State private var agent: AgentPaneController?
+    @State private var showAgent = false
+    /// ★ @AppStorage は Int32 を扱えないので Int で持つ
+    @AppStorage("glauk.defaultAgent") private var defaultAgent = Int(AgentKind.claude.rawValue)
     /// 名前を尋ねるダイアログ(新規ノート / 新規フォルダ / 名前を変更)
     @State private var namePrompt: NamePrompt?
     @State private var nameInput = ""
@@ -59,6 +65,18 @@ struct ContentView: View {
                                  onOpenNote: { name in
                                      Task { await navigator.follow(link: name) }
                                  })
+
+                if showAgent, let agent {
+                    Divider()
+                    AgentPaneBody(controller: agent,
+                                  selectedAgent: $defaultAgent,
+                                  onSwitch: { kind in
+                                      agent.start(agent: kind,
+                                                  cwd: workingDirectory,
+                                                  activeFile: activeFileForAgent)
+                                  })
+                        .frame(width: 420)
+                }
             }
         }
         .frame(minWidth: 900, minHeight: 700)
@@ -109,6 +127,9 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .glaukNewFile)) { _ in
             document.createWithPanel()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .glaukToggleAgent)) { _ in
+            toggleAgent()
+        }
         .onAppear {
             watcher.onExternalChange = { _ in
                 guard let result = document.reloadFromDisk() else { return }
@@ -117,10 +138,15 @@ struct ContentView: View {
                 print("[watch] 読み直した / 変わった行 \(result.changedLines)")
                 #endif
             }
+            // ★ .onChange は最初の値では発火しない。起動時に既に開いていた
+            //   ファイルを見張り始めるために、ここでも1度呼ぶ。
+            watcher.watch(path: document.path)
         }
         // 開いているノートが変わったら見張る先も変える
         .onChange(of: document.path) { _, newPath in
             watcher.watch(path: newPath)
+            // AIペインにも今どれを見ているかを伝える
+            agent?.followActiveFile(activeFileForAgent)
         }
         // 起動時
         .task { await noteIndex.refresh(root: notesFolder.root) }
@@ -162,6 +188,13 @@ struct ContentView: View {
             iconButton("square.and.pencil", help: "新規ファイル…") { document.createWithPanel() }
             iconButton("folder", help: "ファイルを開く (⇧⌘O)") { document.openWithPanel() }
 
+            Divider().frame(height: 14).padding(.horizontal, 4)
+
+            // 開いている間は色を付けて、いま出ていることが分かるようにする
+            iconButton("terminal",
+                       help: showAgent ? "AIペインを隠す (⌘J)" : "AIペインを出す (⌘J)",
+                       active: showAgent) { toggleAgent() }
+
             // 仕様書の「UIクロームは無彩色」に従い、現在地はノート名だけ出す
             if let name = navigator.currentName {
                 Text(name)
@@ -191,11 +224,15 @@ struct ContentView: View {
     private func iconButton(_ symbol: String,
                             help: String,
                             enabled: Bool = true,
+                            active: Bool = false,
                             action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.system(size: 13))
+                .foregroundStyle(active ? Color.accentColor : Color.primary)
                 .frame(width: 26, height: 22)
+                .background(active ? Color.accentColor.opacity(0.15) : .clear,
+                            in: RoundedRectangle(cornerRadius: 5))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.borderless)
@@ -224,6 +261,46 @@ struct ContentView: View {
             Button("vault を選ぶ…") { notesFolder.chooseWithPanel() }
                 .font(.caption)
         }
+    }
+
+    // MARK: - AIペイン
+
+    private func toggleAgent() {
+        if showAgent {
+            agent?.stop()          // ★ 仕様: 閉じたら必ず終了。常駐させない
+            showAgent = false
+            return
+        }
+        let controller = agent ?? AgentPaneController()
+        agent = controller
+        showAgent = true
+        controller.start(agent: AgentKind(rawValue: Int32(defaultAgent)) ?? .claude,
+                         cwd: workingDirectory,
+                         activeFile: activeFileForAgent)
+        // 出した直後に打てるようにする
+        DispatchQueue.main.async { controller.focusTerminal() }
+    }
+
+    /// エージェントを走らせる場所。
+    /// ★ 仕様は「開いているファイルのディレクトリ」だが、vault が決まっているなら
+    ///   その根を使う。ペインを出したままノートを渡り歩くと、cwd はすぐ古くなる。
+    ///   会話を殺さずに追随させる方法が無いので、最初から vault 全体を見せておく。
+    /// ★ / や /tmp にすると、エージェントが変な場所を触りかねない。
+    private var workingDirectory: String {
+        if let root = notesFolder.root, !root.isEmpty { return root }
+        guard let path = document.path else { return NSHomeDirectory() }
+        return (path as NSString).deletingLastPathComponent
+    }
+
+    /// 開いているファイルの、cwd から見た相対パス。未保存なら nil。
+    private var activeFileForAgent: String? {
+        guard let path = document.path, !path.isEmpty else { return nil }
+        let root = workingDirectory
+        guard path.hasPrefix(root + "/") else {
+            // vault の外を開いている。絶対パスなら確実に届く。
+            return path
+        }
+        return String(path.dropFirst(root.count + 1))
     }
 
     // MARK: - ツリーからのファイル操作

@@ -30,7 +30,7 @@ uint8_t* glauk_notes_scan(const char* root, size_t* out_len);
 
 // --- pty ---
 // エージェントCLIを擬似端末の上で起動する。戻り値はセッションID、失敗なら -1。
-int32_t glauk_pty_spawn(int agent, const char* cwd);   // 0=claude, 1=codex
+int32_t glauk_pty_spawn(int agent, const char* cwd, uint16_t rows, uint16_t cols);  // 0=claude, 1=codex
 ssize_t glauk_pty_read(int32_t id, uint8_t* buf, size_t len);   // 0=EOF, -1=エラー
 bool    glauk_pty_write(int32_t id, const uint8_t* data, size_t len);
 bool    glauk_pty_resize(int32_t id, uint16_t rows, uint16_t cols);

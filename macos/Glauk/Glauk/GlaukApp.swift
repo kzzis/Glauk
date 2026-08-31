@@ -43,6 +43,10 @@ struct GlaukApp: App {
                     showTree.toggle()
                 }
                 .keyboardShortcut("\\", modifiers: .command)
+                Button("AIペインを出し入れ") {
+                    NotificationCenter.default.post(name: .glaukToggleAgent, object: nil)
+                }
+                .keyboardShortcut("j", modifiers: .command)
             }
         }
     }

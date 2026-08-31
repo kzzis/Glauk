@@ -8,6 +8,7 @@ const std = @import("std");
 const c = @cImport({
     @cInclude("util.h"); // forkpty
     @cInclude("unistd.h"); // chdir, execvp, _exit
+    @cInclude("stdlib.h"); // setenv
     @cInclude("signal.h"); // kill
     @cInclude("sys/ioctl.h"); // TIOCSWINSZ
     @cInclude("poll.h"); // poll
@@ -31,7 +32,9 @@ pub const Agent = enum(c_int) {
 };
 
 /// エージェントCLIを新しいPTY上で起動する。セッションIDを返す。失敗なら -1。
-pub export fn glauk_pty_spawn(agent: c_int, cwd: [*:0]const u8) callconv(.c) i32 {
+/// ★ 大きさは起動時に渡す。あとから resize する形にすると、CLI は最初の
+///   1画面を 80桁で描いてしまい、折り返しが崩れたまま残る。
+pub export fn glauk_pty_spawn(agent: c_int, cwd: [*:0]const u8, rows: u16, cols: u16) callconv(.c) i32 {
     // ★ 先に検査する。@enumFromInt に知らない値を渡すと安全モードで落ちる。
     //   Swift 側の書き間違いがアプリごと落とす事故になりうる。
     if (agent != @intFromEnum(Agent.claude) and agent != @intFromEnum(Agent.codex)) {
@@ -39,10 +42,15 @@ pub export fn glauk_pty_spawn(agent: c_int, cwd: [*:0]const u8) callconv(.c) i32
         return -1;
     }
 
+    // ★ fork の前に、ユーザーの PATH を1度だけ調べておく。
+    //   GUI アプリが受け取る PATH は /usr/bin:/bin:/usr/sbin:/sbin だけで、
+    //   Homebrew も ~/.local/bin も入っていない。素の execvp は必ず失敗する。
+    const path_z = resolvedUserPath();
+
     var master: c_int = -1;
     var ws: c.struct_winsize = .{
-        .ws_row = 24,
-        .ws_col = 80,
+        .ws_row = if (rows > 0) rows else 24,
+        .ws_col = if (cols > 0) cols else 80,
         .ws_xpixel = 0,
         .ws_ypixel = 0,
     };
@@ -59,16 +67,26 @@ pub export fn glauk_pty_spawn(agent: c_int, cwd: [*:0]const u8) callconv(.c) i32
     if (pid == 0) {
         // ---- ここから子プロセス ----
         if (c.chdir(cwd) != 0) c._exit(126); // 移動できない
-        switch (@as(Agent, @enumFromInt(agent))) {
-            .claude => {
-                const argv = [_:null]?[*:0]const u8{ "claude", null };
-                _ = c.execvp("claude", @constCast(@ptrCast(&argv)));
-            },
-            .codex => {
-                const argv = [_:null]?[*:0]const u8{ "codex", "--cd", cwd, null };
-                _ = c.execvp("codex", @constCast(@ptrCast(&argv)));
-            },
-        }
+
+        // ★ 調べておいた PATH を child に渡してから直接起動する。
+        //   PTY の中で対話シェルを走らせると、ジョブ制御が使えず
+        //   「can't set tty pgrp」を出すうえ、.zshrc の出力も混ざる。
+        _ = c.setenv("PATH", path_z, 1);
+        // ★ GUI アプリの環境には TERM が無い(あっても "dumb")。
+        //   codex は「TERM が dumb なら対話UIを出さない」と明示的に拒否する。
+        //   ここは本物の PTY なので、色と機能を持つ端末名を名乗る。
+        _ = c.setenv("TERM", "xterm-256color", 1);
+        _ = c.setenv("COLORTERM", "truecolor", 1);
+        // 文字化けを避ける。既にあれば尊重する(第3引数 0 = 上書きしない)。
+        _ = c.setenv("LANG", "en_US.UTF-8", 0);
+
+        const kind = @as(Agent, @enumFromInt(agent));
+        const name: [*:0]const u8 = switch (kind) {
+            .claude => "claude",
+            .codex => "codex",
+        };
+        const argv = [_:null]?[*:0]const u8{ name, null };
+        _ = c.execvp(name, @constCast(@ptrCast(&argv)));
         // ★ execvp は成功したら戻ってこない(中身が入れ替わる)。
         //   ここに来たのは失敗したときだけ。127 は「コマンドが無い」の慣習。
         //   exit ではなく _exit。exit だと親から引き継いだバッファを流して
@@ -87,6 +105,50 @@ pub export fn glauk_pty_spawn(agent: c_int, cwd: [*:0]const u8) callconv(.c) i32
     };
     next_id += 1;
     return id;
+}
+
+/// ユーザーのシェルが持っている PATH。初回だけ調べて覚える。
+var user_path_buf: [4096]u8 = undefined;
+var user_path_ready = false;
+var user_path_lock: std.Thread.Mutex = .{};
+
+/// ★ ログインかつ対話のシェルに聞く。zsh は .zshrc を「対話シェルのとき」しか
+///   読まず、~/.local/bin はそこで足されていることが多い。
+///   実測(GUIと同じ最小PATHで): -l -c だと /opt/homebrew/bin しか見えず、
+///   -l -i -c で ~/.local/bin まで入る。
+fn resolvedUserPath() [*:0]const u8 {
+    user_path_lock.lock();
+    defer user_path_lock.unlock();
+    if (user_path_ready) return @ptrCast(&user_path_buf);
+
+    // 失敗したときのために、まず今の PATH を入れておく
+    const current = std.posix.getenv("PATH") orelse "/usr/bin:/bin";
+    const fallback_len = @min(current.len, user_path_buf.len - 1);
+    @memcpy(user_path_buf[0..fallback_len], current[0..fallback_len]);
+    user_path_buf[fallback_len] = 0;
+    user_path_ready = true;
+
+    const shell = std.posix.getenv("SHELL") orelse "/bin/zsh";
+    var probe_state: std.heap.DebugAllocator(.{}) = .init;
+    defer _ = probe_state.deinit();
+    const probe = probe_state.allocator();
+
+    const result = std.process.Child.run(.{
+        .allocator = probe,
+        .argv = &.{ shell, "-l", "-i", "-c", "printf %s \"$PATH\"" },
+        .max_output_bytes = user_path_buf.len - 1,
+    }) catch |err| {
+        std.debug.print("[glauk] PATH を調べられませんでした: {s}\n", .{@errorName(err)});
+        return @ptrCast(&user_path_buf);
+    };
+    defer probe.free(result.stdout);
+    defer probe.free(result.stderr);
+
+    const found = std.mem.trim(u8, result.stdout, " \t\r\n");
+    if (found.len == 0 or found.len >= user_path_buf.len) return @ptrCast(&user_path_buf);
+    @memcpy(user_path_buf[0..found.len], found);
+    user_path_buf[found.len] = 0;
+    return @ptrCast(&user_path_buf);
 }
 
 fn lookup(id: i32) ?Session {
@@ -174,6 +236,6 @@ test "知らないIDをkillしても落ちない" {
 
 test "知らないエージェント番号はspawnせず -1 を返す" {
     // @enumFromInt に落ちる前に弾けているか
-    try testing.expectEqual(@as(i32, -1), glauk_pty_spawn(42, "/tmp"));
+    try testing.expectEqual(@as(i32, -1), glauk_pty_spawn(42, "/tmp", 24, 80));
     try testing.expectEqual(@as(usize, 0), glauk_pty_session_count());
 }
