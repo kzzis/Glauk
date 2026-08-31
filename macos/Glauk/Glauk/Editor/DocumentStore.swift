@@ -13,6 +13,19 @@ final class DocumentStore: ObservableObject {
     /// open() のたびに増える。MarkdownTextView はこれの変化を「差し替え」の合図として使う。
     /// (テキストビューがfirstResponderのままだと通常のbinding経由の更新は無視されるため)
     @Published fileprivate(set) var revision = 0
+    /// 直近のリロードが「外からの書き換え」だったことの記録。
+    /// ★ revision は open() でも増える。エディタ側は「新しいファイルを開いた
+    ///   (カーソルは先頭)」と「同じファイルが外から変わった(カーソルは保つ)」を
+    ///   区別する必要があるので、外部変更のときだけこれを立てる。
+    @Published private(set) var lastExternalEdit: ExternalEdit?
+
+    struct ExternalEdit: Equatable {
+        /// この変更を反映した revision。エディタはこれが一致するときだけ使う。
+        let revision: Int
+        let changedLines: Range<Int>
+        /// 行数の増減。カーソルをずらす量になる。
+        let lineDelta: Int
+    }
 
     fileprivate var saveTask: Task<Void, Never>?
     fileprivate var suppressAutosave = false
@@ -28,6 +41,7 @@ final class DocumentStore: ObservableObject {
         }
         saveTask?.cancel()
         suppressAutosave = true      // 読み込みで保存が走らないように
+        lastExternalEdit = nil       // 別のファイル。前のノートのにじみを持ち込まない
         path = newPath
         text = contents
         revision += 1
@@ -82,6 +96,7 @@ extension DocumentStore {
     func close() {
         saveTask?.cancel()
         suppressAutosave = true
+        lastExternalEdit = nil
         path = nil
         text = ""
         revision += 1
@@ -109,11 +124,18 @@ extension DocumentStore {
 
         let old = text
         let changed = Self.changedLineRange(old: old, new: fresh)
+        let lineDelta = fresh.components(separatedBy: "\n").count
+            - old.components(separatedBy: "\n").count
 
         // ★ リロードで自動保存が走ると、外部の変更を自分が上書きしてしまう
         suppressAutosave = true
         text = fresh
         revision += 1
+        // ★ revision を増やした後に立てる。エディタは revision の一致で
+        //   「この差し替えは外部変更だった」と判断する。
+        lastExternalEdit = ExternalEdit(revision: revision,
+                                        changedLines: changed,
+                                        lineDelta: lineDelta)
         suppressAutosave = false
 
         return ReloadResult(oldText: old, newText: fresh, changedLines: changed)
