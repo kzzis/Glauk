@@ -10,8 +10,12 @@ enum ThemeToken {
         //   .darkAqua との == が外れてライト用の色が出てしまう。
         let isDark = NSApp?.effectiveAppearance
             .bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        // ★ 仕様書はダークのインクを「ブルーブラック #2A4A7F」としているが、
+        //   にじみは文字色ではなく「背景に薄く敷く色」。暗い紙に暗い色を14%で
+        //   敷いても沈んで見えない(実測: ライトの画素差 0.247 に対し 0.067)。
+        //   ブルーブラックの色味は保ったまま、紙より明るい側へ振る。
         return isDark
-            ? NSColor(srgbRed: 0x2A / 255, green: 0x4A / 255, blue: 0x7F / 255, alpha: 1)
+            ? NSColor(srgbRed: 0x7A / 255, green: 0xA6 / 255, blue: 0xE8 / 255, alpha: 1)
             : NSColor(srgbRed: 0xD6 / 255, green: 0x48 / 255, blue: 0x2F / 255, alpha: 1)
     }
 }

@@ -182,6 +182,12 @@ struct MarkdownTextView: NSViewRepresentable {
 
         guard let layoutManager = textView.layoutManager else { return }
         guard let external else {
+            #if DEBUG
+            if isNewDocument {
+                print("[nijimi] 差し替えたが外部変更ではない"
+                      + " (revision \(loadRevision) / 記録 \(String(describing: externalEdit?.revision)))")
+            }
+            #endif
             // 別のノートを開いた。前のノートのにじみが同じ文字位置に残らないようにする。
             if isNewDocument { context.coordinator.nijimi.cancelAll(in: layoutManager) }
             return
@@ -189,6 +195,9 @@ struct MarkdownTextView: NSViewRepresentable {
         // ★ にじみは構文ハイライトの「後」。先に貼ると、ハイライトが触った
         //   レイアウトの再計算で一時属性が消えることがある。
         let changedRange = CursorPreserver.characterRange(forLines: external.changedLines, in: ns)
+        #if DEBUG
+        print("[nijimi] 行 \(external.changedLines) → 文字 \(changedRange) / 本文 \(ns.length)")
+        #endif
         context.coordinator.nijimi.bloom(range: changedRange.clamped(to: ns.length),
                                          in: layoutManager,
                                          color: ThemeToken.accentNSColor)
