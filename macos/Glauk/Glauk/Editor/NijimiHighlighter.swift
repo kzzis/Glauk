@@ -31,9 +31,6 @@ final class NijimiHighlighter {
 
     private var blooms: [Bloom] = []
     private var timer: Timer?
-    #if DEBUG
-    private var loggedFirstTick = false
-    #endif
 
     func bloom(range: NSRange, in layoutManager: NSLayoutManager,
                color: NSColor, textView: NSTextView?) {
@@ -42,10 +39,6 @@ final class NijimiHighlighter {
         blooms.removeAll { $0.layoutManager === layoutManager && $0.range == range }
         blooms.append(Bloom(layoutManager: layoutManager, textView: textView, range: range,
                             color: color, startedAt: CFAbsoluteTimeGetCurrent()))
-        #if DEBUG
-        loggedFirstTick = false
-        print("[nijimi] bloom 受付 \(range) / 本文 \(layoutManager.textStorage?.length ?? -1)")
-        #endif
         startTimerIfNeeded()
     }
 
@@ -66,29 +59,16 @@ final class NijimiHighlighter {
         var stillRunning: [Bloom] = []
 
         for bloom in blooms {
-            guard let lm = bloom.layoutManager else {
-                #if DEBUG
-                print("[nijimi] layoutManager が消えていた")
-                #endif
-                continue
-            }
+            guard let lm = bloom.layoutManager else { continue }   // 消えていたら捨てる
             // 本文が縮んで範囲が外に出ることがある。触る前に必ず丸める。
             let length = lm.textStorage?.length ?? 0
             let range = bloom.range.clamped(to: length)
-            guard range.length > 0 else {
-                #if DEBUG
-                print("[nijimi] 範囲が空になった (元 \(bloom.range) / 本文 \(length))")
-                #endif
-                continue
-            }
+            guard range.length > 0 else { continue }
 
             let progress = min(1.0, (now - bloom.startedAt) / duration)
             if progress >= 1.0 {
                 lm.removeTemporaryAttribute(.backgroundColor, forCharacterRange: range)
                 redraw(bloom, range: range, in: lm)   // 消えたことも描き直さないと残る
-                #if DEBUG
-                print("[nijimi] 乾いた \(range)")
-                #endif
                 continue
             }
             let alpha = alphaCurve(progress) * peakAlpha
@@ -101,13 +81,6 @@ final class NijimiHighlighter {
             //   画面には何も出なかった。テキストビューに直接頼めば必ず描き直される。
             lm.invalidateDisplay(forCharacterRange: range)
             redraw(bloom, range: range, in: lm)
-            #if DEBUG
-            if !loggedFirstTick {
-                loggedFirstTick = true
-                print(String(format: "[nijimi] 最初のtick alpha=%.3f 範囲=%@ 色=%@",
-                             alpha, NSStringFromRange(range), bloom.color.description))
-            }
-            #endif
             stillRunning.append(bloom)
         }
 

@@ -182,12 +182,6 @@ struct MarkdownTextView: NSViewRepresentable {
 
         guard let layoutManager = textView.layoutManager else { return }
         guard let external else {
-            #if DEBUG
-            if isNewDocument {
-                print("[nijimi] 差し替えたが外部変更ではない"
-                      + " (revision \(loadRevision) / 記録 \(String(describing: externalEdit?.revision)))")
-            }
-            #endif
             // 別のノートを開いた。前のノートのにじみが同じ文字位置に残らないようにする。
             if isNewDocument { context.coordinator.nijimi.cancelAll(in: layoutManager) }
             return
