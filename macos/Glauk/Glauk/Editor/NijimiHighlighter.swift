@@ -21,7 +21,10 @@ final class NijimiHighlighter {
         let startedAt: CFAbsoluteTime
     }
 
-    var duration: TimeInterval = 2.4
+    var duration: TimeInterval = 4.0
+    /// にじみ始めてから一番濃くなるまで。★ duration に対する割合ではなく秒で持つ。
+    ///   全体を伸ばしたときに立ち上がりまで間延びすると、インクが染みる感じが消える。
+    var riseDuration: TimeInterval = 0.3
     /// 文字が読めなくならない上限。これ以上濃くすると演出が邪魔になる。
     var peakAlpha: CGFloat = 0.14
     private let frameInterval: TimeInterval = 1.0 / 30.0
@@ -138,7 +141,7 @@ final class NijimiHighlighter {
     /// 素早くにじみ、ゆっくり乾く。
     /// ★ 減衰を線形にすると、ただの点滅に見える。
     private func alphaCurve(_ p: Double) -> CGFloat {
-        let riseUntil = 0.12          // 全体 2.4 秒のうち約 0.3 秒で立ち上がる
+        let riseUntil = min(0.5, riseDuration / duration)
         if p < riseUntil { return CGFloat(p / riseUntil) }
         let dry = (p - riseUntil) / (1 - riseUntil)
         return CGFloat(pow(1 - dry, 1.6))
