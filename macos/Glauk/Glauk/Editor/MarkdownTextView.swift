@@ -200,7 +200,8 @@ struct MarkdownTextView: NSViewRepresentable {
         #endif
         context.coordinator.nijimi.bloom(range: changedRange.clamped(to: ns.length),
                                          in: layoutManager,
-                                         color: ThemeToken.accentNSColor)
+                                         color: ThemeToken.accentNSColor,
+                                         textView: textView)
     }
 
     final class Coordinator: NSObject, NSTextViewDelegate, NSTextStorageDelegate, EditorTextViewDelegate {

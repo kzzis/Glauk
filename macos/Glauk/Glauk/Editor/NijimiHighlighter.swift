@@ -13,6 +13,9 @@ final class NijimiHighlighter {
         /// ★ ノートを切り替えると layoutManager は作り直される。
         ///   弱参照にしておけば、消えた後は静かに捨てられる。
         weak var layoutManager: NSLayoutManager?
+        /// ★ 再描画を頼む相手。layoutManager.invalidateDisplay だけでは
+        ///   画面が更新されないことがある(下の tick を参照)。
+        weak var textView: NSTextView?
         let range: NSRange
         let color: NSColor
         let startedAt: CFAbsoluteTime
@@ -29,11 +32,12 @@ final class NijimiHighlighter {
     private var loggedFirstTick = false
     #endif
 
-    func bloom(range: NSRange, in layoutManager: NSLayoutManager, color: NSColor) {
+    func bloom(range: NSRange, in layoutManager: NSLayoutManager,
+               color: NSColor, textView: NSTextView?) {
         guard range.length > 0 else { return }
         // 同じ場所のにじみが残っていると濃さが二重になる。新しい方だけ残す。
         blooms.removeAll { $0.layoutManager === layoutManager && $0.range == range }
-        blooms.append(Bloom(layoutManager: layoutManager, range: range,
+        blooms.append(Bloom(layoutManager: layoutManager, textView: textView, range: range,
                             color: color, startedAt: CFAbsoluteTimeGetCurrent()))
         #if DEBUG
         loggedFirstTick = false
@@ -78,6 +82,7 @@ final class NijimiHighlighter {
             let progress = min(1.0, (now - bloom.startedAt) / duration)
             if progress >= 1.0 {
                 lm.removeTemporaryAttribute(.backgroundColor, forCharacterRange: range)
+                redraw(bloom, range: range, in: lm)   // 消えたことも描き直さないと残る
                 #if DEBUG
                 print("[nijimi] 乾いた \(range)")
                 #endif
@@ -86,9 +91,13 @@ final class NijimiHighlighter {
             let alpha = alphaCurve(progress) * peakAlpha
             lm.addTemporaryAttributes([.backgroundColor: bloom.color.withAlphaComponent(alpha)],
                                       forCharacterRange: range)
-            // ★ addTemporaryAttributes は自分で再描画を要求するはずだが、
-            //   SwiftUI に載せた NSScrollView の中では届かないことがある。明示的に頼む。
+            // ★ ここが要。addTemporaryAttributes も invalidateDisplay も、
+            //   「そのレイアウトが既に生成されている」ことを前提に再描画を予約する。
+            //   本文を丸ごと差し替えた直後はまだ生成されておらず、予約が捨てられる。
+            //   実測でも、一時属性は 2.4 秒ちゃんと乗っているのに一度も描き直されず、
+            //   画面には何も出なかった。テキストビューに直接頼めば必ず描き直される。
             lm.invalidateDisplay(forCharacterRange: range)
+            redraw(bloom, range: range, in: lm)
             #if DEBUG
             if !loggedFirstTick {
                 loggedFirstTick = true
@@ -105,6 +114,25 @@ final class NijimiHighlighter {
             timer?.invalidate()
             timer = nil
         }
+    }
+
+    /// にじんでいる行だけを描き直させる。取れなければビュー全体に頼む。
+    private func redraw(_ bloom: Bloom, range: NSRange, in lm: NSLayoutManager) {
+        guard let textView = bloom.textView else { return }
+        guard let container = lm.textContainers.first else {
+            textView.needsDisplay = true
+            return
+        }
+        let glyphs = lm.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+        var rect = lm.boundingRect(forGlyphRange: glyphs, in: container)
+        guard !rect.isEmpty else {
+            textView.needsDisplay = true
+            return
+        }
+        rect.origin.x += textView.textContainerInset.width
+        rect.origin.y += textView.textContainerInset.height
+        // 行間ぶん少し広げる。境目に描き残しが出ないように。
+        textView.setNeedsDisplay(rect.insetBy(dx: -4, dy: -4))
     }
 
     /// 素早くにじみ、ゆっくり乾く。
