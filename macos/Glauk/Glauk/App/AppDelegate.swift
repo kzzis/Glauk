@@ -20,7 +20,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 .environmentObject(noteIndex)
                 .environmentObject(notesFolder)
         )
+        // ★ 保存されているテーマを、SwiftUI が立ち上がる前に窓へ入れておく。
+        //   後から入れると、一瞬だけ OS のテーマで描かれて切り替わる。
+        ThemePreference.apply(.current, to: overlay.window)
         installStatusItem()
+
+        #if DEBUG
+        GlaukFont.report()
+        #endif
 
         hotKey.onTrigger = { [weak self] in self?.overlay.toggle() }
         hotKey.register()

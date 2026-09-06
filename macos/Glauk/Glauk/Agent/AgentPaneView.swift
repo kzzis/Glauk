@@ -13,7 +13,11 @@ struct AgentPaneView: NSViewRepresentable {
         return controller.terminalView
     }
 
-    func updateNSView(_ nsView: TerminalView, context: Context) {}
+    /// ★ CGColor に落ちた色は外観の変化に追随しない。SwiftUI がテーマ変更で
+    ///   描き直すこのタイミングで入れ直す。
+    func updateNSView(_ nsView: TerminalView, context: Context) {
+        controller.applyTheme()
+    }
 }
 
 /// ペインの中身。★ @ObservedObject で受けないと、errorMessage が変わっても

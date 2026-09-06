@@ -8,6 +8,7 @@ struct GlaukApp: App {
     /// ★ ContentView と同じキーを見る。UserDefaults 越しなので、
     ///   メニューから切り替えても本文側の @AppStorage がそのまま追従する。
     @AppStorage("glauk.showTree") private var showTree = true
+    @AppStorage(ThemePreference.storageKey) private var theme = ThemePreference.auto.rawValue
 
     init() {
         #if DEBUG
@@ -47,6 +48,12 @@ struct GlaukApp: App {
                     NotificationCenter.default.post(name: .glaukToggleAgent, object: nil)
                 }
                 .keyboardShortcut("j", modifiers: .command)
+                Divider()
+                Picker("テーマ", selection: $theme) {
+                    ForEach(ThemePreference.allCases) { pref in
+                        Text(pref.label).tag(pref.rawValue)
+                    }
+                }
             }
         }
     }

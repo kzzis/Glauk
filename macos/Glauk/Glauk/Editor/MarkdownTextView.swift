@@ -46,6 +46,9 @@ struct MarkdownTextView: NSViewRepresentable {
         layoutManager.diffRemovedBgColor = typography.codeRemovedBg
         layoutManager.diffAddedBarColor = typography.codeAdded
         layoutManager.diffRemovedBarColor = typography.codeRemoved
+        layoutManager.levelLabelColor = typography.levelLabel
+        layoutManager.levelLabelFont = typography.levelLabelFont
+        layoutManager.ruleColor = typography.hrLine
         let storage = NSTextStorage()
         storage.delegate = context.coordinator
         storage.addLayoutManager(layoutManager)
@@ -80,8 +83,13 @@ struct MarkdownTextView: NSViewRepresentable {
         textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude,
                                   height: CGFloat.greatestFiniteMagnitude)
 
-        textView.font = NSFont(name: "IBMPlexMono", size: 15)
-            ?? NSFont.monospacedSystemFont(ofSize: 15, weight: .regular)
+        textView.font = typography.body
+
+        // --- 紙とインク ---
+        // ★ 動的な色なので、1回入れればテーマ切替に自分で追随する。
+        textView.backgroundColor = ThemeToken.NS.paper
+        textView.textColor = ThemeToken.NS.ink
+        textView.insertionPointColor = ThemeToken.NS.accent   // カーソルもインク
 
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineHeightMultiple = 1.55
@@ -97,6 +105,8 @@ struct MarkdownTextView: NSViewRepresentable {
 
         let scrollView = NSScrollView()
         scrollView.hasVerticalScroller = true
+        // ★ 紙の色はテキストビューが塗る。スクロールビューにも塗らせると、
+        //   本文より下の余白だけ別の色になる。
         scrollView.drawsBackground = false
         scrollView.documentView = textView
         return scrollView
@@ -194,7 +204,7 @@ struct MarkdownTextView: NSViewRepresentable {
         #endif
         context.coordinator.nijimi.bloom(range: changedRange.clamped(to: ns.length),
                                          in: layoutManager,
-                                         color: ThemeToken.accentNSColor,
+                                         color: ThemeToken.NS.accent,
                                          textView: textView)
     }
 

@@ -1,5 +1,6 @@
 // ContentView.swift
 import SwiftUI
+import AppKit
 
 struct ContentView: View {
     @EnvironmentObject var noteIndex: NoteIndex
@@ -16,6 +17,8 @@ struct ContentView: View {
     @State private var showAgent = false
     /// ★ @AppStorage は Int32 を扱えないので Int で持つ
     @AppStorage("glauk.defaultAgent") private var defaultAgent = Int(AgentKind.claude.rawValue)
+    /// 紙 / 夜 / システム追従
+    @AppStorage(ThemePreference.storageKey) private var theme = ThemePreference.auto.rawValue
     /// 名前を尋ねるダイアログ(新規ノート / 新規フォルダ / 名前を変更)
     @State private var namePrompt: NamePrompt?
     @State private var nameInput = ""
@@ -81,6 +84,13 @@ struct ContentView: View {
             }
         }
         .frame(minWidth: 900, minHeight: 700)
+        .preferredColorScheme(ThemePreference(rawValue: theme)?.colorScheme)
+        // ★ SwiftUI の外にある NSWindow にも伝える。ここを忘れると
+        //   タイトルバーだけ元のテーマのまま残る。
+        .onChange(of: theme) { _, newValue in
+            ThemePreference.apply(ThemePreference(rawValue: newValue) ?? .auto,
+                                  to: NSApp.keyWindow)
+        }
         .overlay {
             if showSwitcher {
                 NoteSwitcherView(
@@ -231,9 +241,9 @@ struct ContentView: View {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.system(size: 13))
-                .foregroundStyle(active ? Color.accentColor : Color.primary)
+                .foregroundStyle(active ? Color.primary : Color.secondary)
                 .frame(width: 26, height: 22)
-                .background(active ? Color.accentColor.opacity(0.15) : .clear,
+                .background(active ? Color.primary.opacity(0.08) : .clear,
                             in: RoundedRectangle(cornerRadius: 5))
                 .contentShape(Rectangle())
         }

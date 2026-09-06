@@ -18,11 +18,10 @@ struct EditorTypography {
     /// MarkdownTextView が textView.font に入れているものと必ず揃えること。
     /// ここがズレると applySpans が全文の .font を上書きしてしまい、等幅で書いているつもりが
     /// プロポーショナルで表示される(太字の差も分かりにくくなる)。
-    var body = NSFont(name: "IBMPlexMono", size: 15)
-        ?? NSFont.monospacedSystemFont(ofSize: 15, weight: .regular)
+    var body = GlaukFont.body(size: 15)
     var heading: (Int) -> NSFont = { level in
         let sizes: [CGFloat] = [28, 22, 18, 16, 15, 15]
-        return NSFont.systemFont(ofSize: sizes[min(max(level, 1), 6) - 1], weight: .bold)
+        return GlaukFont.heading(level: level, size: sizes[min(max(level, 1), 6) - 1])
     }
     /// システム等幅フォントに対しては、NSFontManager の変換もディスクリプタの .bold も
     /// **Semibold(weight 0.30)** しか返さず「太くなっていない」ように見える。
@@ -34,13 +33,17 @@ struct EditorTypography {
         if weight >= NSFont.Weight.bold.rawValue { return converted }
         return NSFont.monospacedSystemFont(ofSize: base.pointSize, weight: .bold)
     }
-    var accent = NSColor.systemRed      // Step 9 でテーマトークンに差し替え
-    var muted = NSColor.secondaryLabelColor
-    var ink = NSColor.textColor
+    var accent = ThemeToken.NS.accent
+    var muted = ThemeToken.NS.quote
+    var ink = ThemeToken.NS.ink
+    /// 見出しの左に出す "H1" ラベル
+    var levelLabel = ThemeToken.NS.levelLabel
+    var levelLabelFont = GlaukFont.mono(size: 9)
+    /// `---` の区切り線
+    var hrLine = ThemeToken.NS.hr
     /// コードは本文より少し小さい等幅。本文が既に等幅なのでフォント自体は同系だが、
     /// Step 9 で本文がサンセリフになったときにここだけ等幅で残るように分けておく。
-    var code = NSFont(name: "IBMPlexMono", size: 14)
-        ?? NSFont.monospacedSystemFont(ofSize: 14, weight: .regular)
+    var code = GlaukFont.mono(size: 14)
     /// 「たたむ」ためのフォント。グリフを消すだけでは行が1行分残るため(実測: 4行が1行分残った)、
     /// 極小フォントを併用して行の高さごと潰す。
     var folded = NSFont.systemFont(ofSize: 0.01)
@@ -63,7 +66,7 @@ struct EditorTypography {
     var codeNumber = dynamicColor(dark: 0xFFA657, light: 0xB35900)
     var codeComment = NSColor.secondaryLabelColor
     /// ブロック右上に出す言語名
-    var codeLangLabel = NSColor.tertiaryLabelColor
+    var codeLangLabel = ThemeToken.NS.quote
     // --- diff ---
     var codeAdded = dynamicColor(dark: 0x7EE787, light: 0x116329)
     var codeRemoved = dynamicColor(dark: 0xFFA198, light: 0x82071E)
@@ -72,7 +75,7 @@ struct EditorTypography {
     var codeRemovedBg = dynamicColor(dark: 0x4A1418, light: 0xFFEBE9)
 
     /// 引用の縦棒の色と太さ
-    var quoteBar = NSColor.systemRed
+    var quoteBar = ThemeToken.NS.accent
     var quoteBarWidth: CGFloat = 2
 
     /// MarkdownTextView の defaultParagraphStyle と必ず揃えること
@@ -114,9 +117,9 @@ struct EditorTypography {
     var codeCornerRadius: CGFloat = 6
     var inlineCodeCornerRadius: CGFloat = 3
     /// テーブルの罫線
-    var tableRule = NSColor.separatorColor
-    /// glauk-design-doc.md の CodeBg(Light #EFEDE8 / Dark #26262A)
-    var codeBg = dynamicColor(dark: 0x26262A, light: 0xEFEDE8)
+    var tableRule = ThemeToken.NS.hr
+    var codeBg = ThemeToken.NS.codeBg
+    var codeBorder = ThemeToken.NS.codeBorder
 
     // --- Obsidian 互換の記法 ---
     /// ==ハイライト== の下地。蛍光ペン風に薄く敷く
@@ -241,6 +244,7 @@ final class SyntaxHighlighter {
                     : Int(span.kind.rawValue) - 29
                 let lineRange = (storage.string as NSString).lineRange(for: span.range)
                 storage.addAttribute(.font, value: typography.heading(level), range: lineRange)
+                storage.addAttribute(.glaukHeadingLevel, value: level, range: lineRange)
                 if !onCursorLine { storage.addAttribute(.glaukHidden, value: true, range: span.range) }
 
             case .boldMarker:
