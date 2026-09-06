@@ -11,6 +11,9 @@ struct MarkdownTextView: NSViewRepresentable {
     /// 索引が変わるたびに増える値。これが変わったら `[[リンク]]` の色だけ塗り直す
     /// (走査は非同期なので、初回表示のときは索引がまだ空のことがある)。
     var indexRevision = 0
+    /// 直近の差し替えが外部変更だったときだけ入る(revision が一致するときのみ有効)。
+    /// カーソル保全とにじみは、これがあるときにだけ働く。
+    var externalEdit: DocumentStore.ExternalEdit?
     /// `[[リンク]]` がクリックされた。名前(`|`や`#`を落としたもの)が渡る。
     var onOpenNote: (String) -> Void = { _ in }
     var typewriterScroll: Bool = true
@@ -140,22 +143,70 @@ struct MarkdownTextView: NSViewRepresentable {
         }
         context.coordinator.lastLoadRevision = loadRevision
 
+        // ★ Step 8b: 同じ revision の外部変更だけを「にじませる対象」とみなす。
+        //   古い記録を使い回すと、無関係な差し替えでカーソルがずれる。
+        let external = externalEdit?.revision == loadRevision ? externalEdit : nil
+
         let selected = textView.selectedRange()
+        let scrollOffset = textView.enclosingScrollView?.contentView.bounds.origin ?? .zero
+        // ★ setSelectedRange はタイプライタースクロールを発火させる。
+        //   そのままだと、この後で戻すスクロール位置が打ち消される。
+        context.coordinator.suppressTypewriterScroll = external != nil
+
         textView.string = text
         let ns = text as NSString
         // 新しいファイルを開いたときは先頭にカーソルを置く。同一文書内の更新は選択位置を保つ。
-        let safeLocation = isNewDocument ? 0 : min(selected.location, ns.length)
-        textView.setSelectedRange(NSRange(location: safeLocation, length: 0))
+        let safeLocation: Int
+        if let external {
+            // 変更がカーソルより前なら、増えた/減った行数だけ連れていく
+            safeLocation = CursorPreserver.adjust(
+                location: selected.location, in: ns,
+                changedFromLine: external.changedLines.lowerBound,
+                lineDelta: external.lineDelta)
+        } else {
+            safeLocation = isNewDocument ? 0 : min(selected.location, ns.length)
+        }
+        textView.setSelectedRange(NSRange(location: min(safeLocation, ns.length), length: 0))
+
+        if external != nil, let scrollView = textView.enclosingScrollView {
+            scrollView.contentView.setBoundsOrigin(scrollOffset)
+            scrollView.reflectScrolledClipView(scrollView.contentView)
+        }
+        context.coordinator.suppressTypewriterScroll = false
+
         if let storage = textView.textStorage {
             // cursorLine を nil にするとカーソル行のマーカーまで隠れてしまう
             let cursorLine = ns.lineRange(for: NSRange(location: safeLocation, length: 0))
             context.coordinator.highlighter.apply(to: storage, cursorLine: cursorLine)
         }
+
+        guard let layoutManager = textView.layoutManager else { return }
+        guard let external else {
+            // 別のノートを開いた。前のノートのにじみが同じ文字位置に残らないようにする。
+            if isNewDocument { context.coordinator.nijimi.cancelAll(in: layoutManager) }
+            return
+        }
+        // ★ にじみは構文ハイライトの「後」。先に貼ると、ハイライトが触った
+        //   レイアウトの再計算で一時属性が消えることがある。
+        let changedRange = CursorPreserver.characterRange(forLines: external.changedLines, in: ns)
+        #if DEBUG
+        print("[nijimi] 行 \(external.changedLines) → 文字 \(changedRange) / 本文 \(ns.length)")
+        #endif
+        context.coordinator.nijimi.bloom(range: changedRange.clamped(to: ns.length),
+                                         in: layoutManager,
+                                         color: ThemeToken.accentNSColor,
+                                         textView: textView)
     }
 
     final class Coordinator: NSObject, NSTextViewDelegate, NSTextStorageDelegate, EditorTextViewDelegate {
         private let parent: MarkdownTextView
         let highlighter = SyntaxHighlighter()
+        /// ★ NijimiHighlighter は @MainActor。Coordinator の生成は SwiftUI の
+        ///   makeCoordinator から来るので実際にはメインスレッドだが、型の上では
+        ///   保証がない。最初に触るとき(必ずメインスレッド)まで遅らせる。
+        lazy var nijimi: NijimiHighlighter = MainActor.assumeIsolated { NijimiHighlighter() }
+        /// リロード中はスクロール位置を自分で戻すので、中央寄せを止める
+        var suppressTypewriterScroll = false
         private lazy var completion = WikilinkCompletion(index: parent.noteIndex)
         weak var textView: NSTextView?
         var textStorage: NSTextStorage?   // NSTextView/NSTextContainerはlayoutManagerを弱参照するため、これが無いと解放されて編集不能になる
@@ -294,7 +345,9 @@ struct MarkdownTextView: NSViewRepresentable {
         func textViewDidChangeSelection(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
             scheduleHighlight()
-            if parent.typewriterScroll { scrollCurrentLineToCenter(textView) }
+            if parent.typewriterScroll && !suppressTypewriterScroll {
+                scrollCurrentLineToCenter(textView)
+            }
         }
 
         /// 編集サイクルを抜けた次のターンで、まとめて1回だけ塗る

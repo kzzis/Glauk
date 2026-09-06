@@ -49,7 +49,10 @@ final class AgentPaneController: NSObject, ObservableObject {
     }
 
     /// - Parameter activeFile: 開いているファイルの、cwd から見た相対パス。
-    ///   未保存なら nil。入力欄の先頭に `@名前 ` として差し込む。
+    ///   未保存なら nil。入力欄の先頭にそのまま差し込む。
+    /// ★ 以前は `@名前` にしていたが、`@` は claude / codex 双方でファイル検索の
+    ///   ポップアップを開く。開いたままだと CLI 側が入力を横取りし、日本語の
+    ///   変換候補が出せなくなる。素のパスでも「どのファイルの話か」は通じる。
     func start(agent: AgentKind, cwd: String, activeFile: String?) {
         errorMessage = nil
         // ★ 前の会話を消してから始める。切り替えは作り直しなので、
@@ -58,7 +61,7 @@ final class AgentPaneController: NSObject, ObservableObject {
         cancelSeed()
         insertedSeed = nil
         userTypedSinceSeed = false
-        pendingSeed = activeFile.map { "@\($0) " }
+        pendingSeed = activeFile.map { "\($0) " }
         contextFile = activeFile
         guard pty.start(agent: agent, cwd: cwd) else {
             errorMessage = "エージェントを起動できませんでした"
@@ -133,7 +136,7 @@ final class AgentPaneController: NSObject, ObservableObject {
     ///   ぶんの文字数しか消さないので、書きかけを巻き込むことはない。
     ///   打ち始めていたら何もしない — ヘッダの表示だけが新しいファイルを指す。
     func followActiveFile(_ relativePath: String?) {
-        let seed = relativePath.map { "@\($0) " }
+        let seed = relativePath.map { "\($0) " }
 
         // まだ差し込んでいない(CLI の起動中)なら、送る中身を入れ替えるだけでよい。
         if pendingSeed != nil {

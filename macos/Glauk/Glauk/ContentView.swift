@@ -62,6 +62,7 @@ struct ContentView: View {
                                  noteIndex: noteIndex,
                                  loadRevision: document.revision,
                                  indexRevision: noteIndex.revision,
+                                 externalEdit: document.lastExternalEdit,
                                  onOpenNote: { name in
                                      Task { await navigator.follow(link: name) }
                                  })
@@ -132,8 +133,9 @@ struct ContentView: View {
         }
         .onAppear {
             watcher.onExternalChange = { _ in
+                // ★ にじみとカーソル保全は MarkdownTextView 側で起きる。
+                //   ここは読み直すだけ。document.lastExternalEdit が合図になる。
                 guard let result = document.reloadFromDisk() else { return }
-                // Step 8b でここに「にじみ」を入れる
                 #if DEBUG
                 print("[watch] 読み直した / 変わった行 \(result.changedLines)")
                 #endif
