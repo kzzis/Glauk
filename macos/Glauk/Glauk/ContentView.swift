@@ -227,6 +227,17 @@ struct ContentView: View {
                     .lineLimit(1)
             }
             vaultButton
+            // ★ 設定は ⌘, とアプリメニューからも開けるが、そこに気づけるとは
+            //   限らない。テーマの入口をここにも出しておく。
+            SettingsLink {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 13, weight: .regular))
+                    .frame(width: 26, height: 22)
+                    .contentShape(Rectangle())
+                    .foregroundStyle(Color.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("設定 (⌘,)")
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
