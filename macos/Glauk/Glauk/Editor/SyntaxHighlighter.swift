@@ -159,7 +159,8 @@ struct EditorTypography {
 }
 
 final class SyntaxHighlighter {
-    private let typography: EditorTypography
+    /// ★ テーマを切り替えると色ごと入れ替わる。let にすると差し替えられない。
+    var typography: EditorTypography
     /// 未作成ノートの区別表示に使う。Coordinator から NoteIndex を差し込む
     var noteExists: (String) -> Bool = { _ in true }
 

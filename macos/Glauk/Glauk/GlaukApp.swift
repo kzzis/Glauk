@@ -49,7 +49,7 @@ struct GlaukApp: App {
                 }
                 .keyboardShortcut("j", modifiers: .command)
                 Divider()
-                Picker("テーマ", selection: $theme) {
+                Picker("明るさ", selection: $theme) {
                     ForEach(ThemePreference.allCases) { pref in
                         Text(pref.label).tag(pref.rawValue)
                     }

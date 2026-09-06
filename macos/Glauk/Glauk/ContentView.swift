@@ -19,6 +19,7 @@ struct ContentView: View {
     @AppStorage("glauk.defaultAgent") private var defaultAgent = Int(AgentKind.claude.rawValue)
     /// 紙 / 夜 / システム追従
     @AppStorage(ThemePreference.storageKey) private var theme = ThemePreference.auto.rawValue
+    @AppStorage(GlaukTheme.storageKey) private var palette = GlaukTheme.paper.rawValue
     /// 名前を尋ねるダイアログ(新規ノート / 新規フォルダ / 名前を変更)
     @State private var namePrompt: NamePrompt?
     @State private var nameInput = ""
@@ -66,6 +67,7 @@ struct ContentView: View {
                                  loadRevision: document.revision,
                                  indexRevision: noteIndex.revision,
                                  externalEdit: document.lastExternalEdit,
+                                 themeID: palette,
                                  onOpenNote: { name in
                                      Task { await navigator.follow(link: name) }
                                  })

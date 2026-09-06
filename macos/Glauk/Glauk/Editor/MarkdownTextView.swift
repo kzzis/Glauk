@@ -14,6 +14,10 @@ struct MarkdownTextView: NSViewRepresentable {
     /// 直近の差し替えが外部変更だったときだけ入る(revision が一致するときのみ有効)。
     /// カーソル保全とにじみは、これがあるときにだけ働く。
     var externalEdit: DocumentStore.ExternalEdit?
+    /// 選ばれている配色。変わったら色を入れ直す。
+    /// ★ ライト⇔ダークは動的な色が勝手に追随するのでここは要らないが、
+    ///   テーマの切り替えは参照する Color Set の名前ごと変わるので取り直しが要る。
+    var themeID: String = GlaukTheme.paper.rawValue
     /// `[[リンク]]` がクリックされた。名前(`|`や`#`を落としたもの)が渡る。
     var onOpenNote: (String) -> Void = { _ in }
     var typewriterScroll: Bool = true
@@ -23,10 +27,12 @@ struct MarkdownTextView: NSViewRepresentable {
     }
 
     // 最初に1回だけ呼ばれる。ここでAppKit側を組み立てる
-    func makeNSView(context: Context) -> NSScrollView {
-        let layoutManager = MarkdownLayoutManager()
-        // 文字では表せない装飾(角丸・縦棒・罫線)を描くための色をハイライタと揃える
-        let typography = EditorTypography()
+    /// レイアウトマネージャとテキストビューに色を入れる。
+    /// ★ makeNSView とテーマ切替の両方から呼ぶ。片方だけに書くと、
+    ///   切り替えたときに装飾だけ前のテーマの色で残る。
+    private func applyTypography(_ typography: EditorTypography,
+                                 to layoutManager: MarkdownLayoutManager,
+                                 textView: NSTextView) {
         layoutManager.codeBgColor = typography.codeBg
         layoutManager.codeLangColor = typography.codeLangLabel
         layoutManager.codeCornerRadius = typography.codeCornerRadius
@@ -49,6 +55,17 @@ struct MarkdownTextView: NSViewRepresentable {
         layoutManager.levelLabelColor = typography.levelLabel
         layoutManager.levelLabelFont = typography.levelLabelFont
         layoutManager.ruleColor = typography.hrLine
+
+        // --- 紙とインク ---
+        textView.backgroundColor = ThemeToken.NS.paper
+        textView.textColor = ThemeToken.NS.ink
+        textView.insertionPointColor = ThemeToken.NS.accent   // カーソルもインク
+    }
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let layoutManager = MarkdownLayoutManager()
+        // 文字では表せない装飾(角丸・縦棒・罫線)を描くための色をハイライタと揃える
+        let typography = EditorTypography()
         let storage = NSTextStorage()
         storage.delegate = context.coordinator
         storage.addLayoutManager(layoutManager)
@@ -84,12 +101,7 @@ struct MarkdownTextView: NSViewRepresentable {
                                   height: CGFloat.greatestFiniteMagnitude)
 
         textView.font = typography.body
-
-        // --- 紙とインク ---
-        // ★ 動的な色なので、1回入れればテーマ切替に自分で追随する。
-        textView.backgroundColor = ThemeToken.NS.paper
-        textView.textColor = ThemeToken.NS.ink
-        textView.insertionPointColor = ThemeToken.NS.accent   // カーソルもインク
+        applyTypography(typography, to: layoutManager, textView: textView)
 
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineHeightMultiple = 1.55
@@ -101,6 +113,7 @@ struct MarkdownTextView: NSViewRepresentable {
         context.coordinator.textStorage = storage   // ★ NSTextStorageの所有者がここしか無いので強参照で保持する
         context.coordinator.lastLoadRevision = loadRevision
         context.coordinator.lastIndexRevision = indexRevision
+        context.coordinator.lastThemeID = themeID
         context.coordinator.highlighter.apply(to: storage, cursorLine: nil)
 
         let scrollView = NSScrollView()
@@ -122,6 +135,24 @@ struct MarkdownTextView: NSViewRepresentable {
         //   下の `textView.string = text` はテキストビューを丸ごと置き換えるので、
         //   変換中に SwiftUI の再描画が挟まると未確定の文字列ごと消える。
         guard !textView.hasMarkedText() else { return }
+
+        // ★ Step 9: テーマが変わった。参照する Color Set の名前ごと変わるので、
+        //   動的な色まかせにはできない。装飾の色を入れ直して本文も塗り直す。
+        if context.coordinator.lastThemeID != themeID {
+            context.coordinator.lastThemeID = themeID
+            let typography = EditorTypography()
+            context.coordinator.highlighter.typography = typography
+            if let lm = textView.layoutManager as? MarkdownLayoutManager {
+                applyTypography(typography, to: lm, textView: textView)
+            }
+            if let storage = textView.textStorage {
+                let ns = textView.string as NSString
+                let selection = textView.selectedRange().clamped(to: ns.length)
+                context.coordinator.highlighter.apply(to: storage,
+                                                      cursorLine: ns.lineRange(for: selection))
+            }
+            textView.needsDisplay = true
+        }
 
         // ★ Step 5a: 走査が終わって索引が入れ替わったら、本文はそのままで塗り直す。
         //   これが無いと、起動直後に開いていた文書の `[[リンク]]` が
@@ -222,6 +253,7 @@ struct MarkdownTextView: NSViewRepresentable {
         var textStorage: NSTextStorage?   // NSTextView/NSTextContainerはlayoutManagerを弱参照するため、これが無いと解放されて編集不能になる
         var lastLoadRevision: Int?
         var lastIndexRevision = 0
+        var lastThemeID = GlaukTheme.paper.rawValue
         var onOpenNote: (String) -> Void = { _ in }
         private var lastCursorLine: NSRange?
         private var pendingEditedRange: NSRange?

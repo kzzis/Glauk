@@ -2,7 +2,8 @@
 import SwiftUI
 import AppKit
 
-/// OS 追従か、手動で固定するか。
+/// 明るい側か暗い側か。★ 配色そのものは GlaukTheme が持つ。こちらは
+/// 「どちらの面を使うか」だけを決める。
 enum ThemePreference: String, CaseIterable, Identifiable {
     case auto, light, dark
 
@@ -11,8 +12,8 @@ enum ThemePreference: String, CaseIterable, Identifiable {
     var label: String {
         switch self {
         case .auto: return "システムに合わせる"
-        case .light: return "紙"
-        case .dark: return "夜"
+        case .light: return "ライト"
+        case .dark: return "ダーク"
         }
     }
 
