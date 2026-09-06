@@ -25,10 +25,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ThemePreference.apply(.current, to: overlay.window)
         installStatusItem()
 
-        #if DEBUG
-        GlaukFont.report()
-        #endif
-
         hotKey.onTrigger = { [weak self] in self?.overlay.toggle() }
         hotKey.register()
 
