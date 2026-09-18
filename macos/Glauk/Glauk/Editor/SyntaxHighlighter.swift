@@ -18,7 +18,7 @@ struct EditorTypography {
     /// MarkdownTextView が textView.font に入れているものと必ず揃えること。
     /// ここがズレると applySpans が全文の .font を上書きしてしまい、等幅で書いているつもりが
     /// プロポーショナルで表示される(太字の差も分かりにくくなる)。
-    var body = GlaukFont.body(size: 15)
+    var body = GlaukFont.body(size: 16)
     var heading: (Int) -> NSFont = { level in
         let sizes: [CGFloat] = [28, 22, 18, 16, 15, 15]
         return GlaukFont.heading(level: level, size: sizes[min(max(level, 1), 6) - 1])
@@ -78,16 +78,35 @@ struct EditorTypography {
     var quoteBar = ThemeToken.NS.accent
     var quoteBarWidth: CGFloat = 2
 
+    /// 行の高さ。★ 全部の段落スタイルで揃えること。ここがバラつくと、
+    ///   リストと本文が隣り合ったときに行が踊って見える。
+    static let lineHeight: CGFloat = 1.7
+
     /// MarkdownTextView の defaultParagraphStyle と必ず揃えること
     var bodyParagraph: NSParagraphStyle = {
         let p = NSMutableParagraphStyle()
-        p.lineHeightMultiple = 1.55
+        p.lineHeightMultiple = EditorTypography.lineHeight
+        // 段落の切れ目に息継ぎを作る。行間だけ広げると、どこで段落が
+        // 変わったのか分からなくなる。
+        p.paragraphSpacing = 8
         return p
     }()
+
+    /// 見出しは上に大きく空ける。下は詰める。
+    /// ★ 見出しは「次の段落の頭」なので、上下同じだけ空けるとどちらに
+    ///   属しているのか分からなくなる。
+    var headingParagraph: (Int) -> NSParagraphStyle = { level in
+        let before: [CGFloat] = [30, 26, 22, 18, 16, 16]
+        let p = NSMutableParagraphStyle()
+        p.lineHeightMultiple = 1.25          // 大きい字は行間を詰める方が締まる
+        p.paragraphSpacingBefore = before[min(max(level, 1), 6) - 1]
+        p.paragraphSpacing = 6
+        return p
+    }
     /// 引用は字下げして、空いた左側に縦棒を描く
     var quoteParagraph: NSParagraphStyle = {
         let p = NSMutableParagraphStyle()
-        p.lineHeightMultiple = 1.55
+        p.lineHeightMultiple = EditorTypography.lineHeight
         p.firstLineHeadIndent = 16
         p.headIndent = 16
         return p
@@ -98,7 +117,7 @@ struct EditorTypography {
         let step: CGFloat = 20
         let base = step * CGFloat(level)
         let p = NSMutableParagraphStyle()
-        p.lineHeightMultiple = 1.55
+        p.lineHeightMultiple = EditorTypography.lineHeight
         p.firstLineHeadIndent = base
         p.headIndent = base + step
         return p
@@ -131,8 +150,7 @@ struct EditorTypography {
     /// %%コメント%% は「出ない」ものなので、あることだけ分かる程度に薄くする
     var commentText = NSColor.tertiaryLabelColor
     /// $数式$ は等幅寄りにして本文と区別する
-    var math = NSFont(name: "IBMPlexMono", size: 15)
-        ?? NSFont.monospacedSystemFont(ofSize: 15, weight: .regular)
+    var math = GlaukFont.mono(size: 14)
     var mathText = dynamicColor(dark: 0xC3A6FF, light: 0x6B21A8)
     /// 脚注 [^1] とブロックID ^abc は小さく薄く
     var superscript = NSFont.systemFont(ofSize: 10)
@@ -245,6 +263,8 @@ final class SyntaxHighlighter {
                     : Int(span.kind.rawValue) - 29
                 let lineRange = (storage.string as NSString).lineRange(for: span.range)
                 storage.addAttribute(.font, value: typography.heading(level), range: lineRange)
+                storage.addAttribute(.paragraphStyle,
+                                     value: typography.headingParagraph(level), range: lineRange)
                 storage.addAttribute(.glaukHeadingLevel, value: level, range: lineRange)
                 if !onCursorLine { storage.addAttribute(.glaukHidden, value: true, range: span.range) }
 

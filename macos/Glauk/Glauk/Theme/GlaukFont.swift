@@ -25,9 +25,14 @@ enum GlaukFont {
         first(["SourceSerif4-Semibold", "NotoSerifJP-Bold"], size: size, weight: .bold)
     }
 
-    /// 本文
-    static func body(size: CGFloat = 15) -> NSFont {
-        first(["Inter-Regular", "NotoSansJP-Regular", "IBMPlexMono"], size: size)
+    /// 本文。★ 等幅にしない。読み物としての見た目は、ここを
+    ///   プロポーショナルにするかどうかで大きく変わる。
+    ///   和文はシステムフォントからヒラギノへ自動で落ちる。
+    static func body(size: CGFloat = 16) -> NSFont {
+        for name in ["Inter-Regular", "NotoSansJP-Regular"] {
+            if let f = NSFont(name: name, size: size) { return f }
+        }
+        return NSFont.systemFont(ofSize: size)
     }
 
     /// コードと AIペイン

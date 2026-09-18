@@ -52,8 +52,6 @@ struct MarkdownTextView: NSViewRepresentable {
         layoutManager.diffRemovedBgColor = typography.codeRemovedBg
         layoutManager.diffAddedBarColor = typography.codeAdded
         layoutManager.diffRemovedBarColor = typography.codeRemoved
-        layoutManager.levelLabelColor = typography.levelLabel
-        layoutManager.levelLabelFont = typography.levelLabelFont
         layoutManager.ruleColor = typography.hrLine
 
         // --- 紙とインク ---
@@ -91,7 +89,8 @@ struct MarkdownTextView: NSViewRepresentable {
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = false
         textView.autoresizingMask = NSView.AutoresizingMask.width
-        textView.textContainerInset = NSSize(width: 32, height: 32)
+        // 横の余白は行長を 720pt に抑えるために EditorTextView が計算し直す
+        textView.textContainerInset = NSSize(width: 32, height: 40)
         // ★ これが無いと maxSize は生成時のフレーム高さのまま = 表示領域の高さで頭打ちになり、
         //   本文がそれより長くてもテキストビューが伸びない(実測: 本文2545ptに対しフレーム660pt)。
         //   さらに scrollCurrentLineToCenter の maxY が 0 になるため、
@@ -103,10 +102,14 @@ struct MarkdownTextView: NSViewRepresentable {
         textView.font = typography.body
         applyTypography(typography, to: layoutManager, textView: textView)
 
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.lineHeightMultiple = 1.55
-        textView.defaultParagraphStyle = paragraph
-        textView.typingAttributes[.paragraphStyle] = paragraph
+        // ★ EditorTypography.bodyParagraph と必ず同じものを使う。
+        //   別々に書くと、打っている最中と塗り直した後で行間が変わる。
+        textView.defaultParagraphStyle = typography.bodyParagraph
+        // ★ typingAttributes に段落スタイルを固定しないこと。固定すると、
+        //   見出し行に1文字打つたびにその段落が本文の段落スタイルで上書きされ、
+        //   見出しの字間と上の余白が打っている最中だけ崩れる。
+        //   指定しなければ、AppKit がカーソル位置の属性を引き継いでくれる。
+        textView.typingAttributes[.paragraphStyle] = nil
 
         textView.string = text
         context.coordinator.textView = textView
