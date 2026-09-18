@@ -53,10 +53,6 @@ struct MarkdownTextView: NSViewRepresentable {
         layoutManager.diffAddedBarColor = typography.codeAdded
         layoutManager.diffRemovedBarColor = typography.codeRemoved
         layoutManager.ruleColor = typography.hrLine
-        if let editor = textView as? EditorTextView {
-            editor.levelLabelColor = typography.levelLabel
-            editor.levelLabelFont = typography.levelLabelFont
-        }
 
         // --- 紙とインク ---
         textView.backgroundColor = ThemeToken.NS.paper
