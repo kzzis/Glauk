@@ -177,6 +177,19 @@ struct EditorTypography {
 }
 
 final class SyntaxHighlighter {
+    /// その行に、マーカー以外の中身があるか。
+    /// ★ 行が幅ゼロの文字だけになると、AppKit はその行に行分割を作らず、
+    ///   前の行の分割に含めてしまう。見た目の上でその行は消え、カーソルも
+    ///   上の行に乗る。隠してよいのは「隠しても何か残る」ときだけ。
+    static func lineHasContent(besides marker: NSRange, in ns: NSString) -> Bool {
+        let line = ns.lineRange(for: marker)
+        let after = NSRange(location: NSMaxRange(marker),
+                            length: max(0, NSMaxRange(line) - NSMaxRange(marker)))
+        guard after.length > 0 else { return false }
+        return !ns.substring(with: after)
+            .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     /// ★ テーマを切り替えると色ごと入れ替わる。let にすると差し替えられない。
     var typography: EditorTypography
     /// 未作成ノートの区別表示に使う。Coordinator から NoteIndex を差し込む
@@ -266,7 +279,13 @@ final class SyntaxHighlighter {
                 storage.addAttribute(.paragraphStyle,
                                      value: typography.headingParagraph(level), range: lineRange)
                 storage.addAttribute(.glaukHeadingLevel, value: level, range: lineRange)
-                if !onCursorLine { storage.addAttribute(.glaukHidden, value: true, range: span.range) }
+                // ★ 中身がまだ無い行でマーカーを隠してはいけない。行が幅ゼロの
+                //   文字だけになると、その行は前の行の行分割に飲み込まれ、
+                //   カーソルが上の行へ飛ぶ(「# を打つと上の行に行ってしまう」)。
+                //   何か書き始めた時点で隠れる。
+                if !onCursorLine, Self.lineHasContent(besides: span.range, in: ns) {
+                    storage.addAttribute(.glaukHidden, value: true, range: span.range)
+                }
 
             case .boldMarker:
                 if let open = pendingBoldOpen {
@@ -440,7 +459,10 @@ final class SyntaxHighlighter {
                 storage.addAttribute(.paragraphStyle, value: typography.quoteParagraph, range: lineRange)
                 // 縦棒は MarkdownLayoutManager が描く
                 storage.addAttribute(.glaukQuote, value: true, range: lineRange)
-                if !onCursorLine { storage.addAttribute(.glaukHidden, value: true, range: span.range) }
+                // 見出しと同じ理由。中身がまだ無いうちは隠さない(下の lineHasContent)
+                if !onCursorLine, Self.lineHasContent(besides: span.range, in: ns) {
+                    storage.addAttribute(.glaukHidden, value: true, range: span.range)
+                }
 
             case .quoteText:
                 storage.addAttribute(.foregroundColor, value: typography.muted, range: span.range)
