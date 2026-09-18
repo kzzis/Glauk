@@ -190,6 +190,19 @@ struct EditorTypography {
 }
 
 final class SyntaxHighlighter {
+    /// その行に、マーカー以外の中身があるか。
+    /// ★ まだ何も書いていない見出し行を「見出しとして」組むと、何も無いところに
+    ///   本文2行ぶんの空白が現れる。上に空の `# ` 行があると様子がおかしいのは
+    ///   これ。中身ができてから見出しにする。
+    static func lineHasContent(besides marker: NSRange, in ns: NSString) -> Bool {
+        let line = ns.lineRange(for: marker)
+        let after = NSRange(location: NSMaxRange(marker),
+                            length: max(0, NSMaxRange(line) - NSMaxRange(marker)))
+        guard after.length > 0 else { return false }
+        return !ns.substring(with: after)
+            .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     /// ★ テーマを切り替えると色ごと入れ替わる。let にすると差し替えられない。
     var typography: EditorTypography
     /// 未作成ノートの区別表示に使う。Coordinator から NoteIndex を差し込む
@@ -275,10 +288,16 @@ final class SyntaxHighlighter {
                     ? Int(span.kind.rawValue)
                     : Int(span.kind.rawValue) - 29
                 let lineRange = (storage.string as NSString).lineRange(for: span.range)
-                storage.addAttribute(.font, value: typography.heading(level), range: lineRange)
-                storage.addAttribute(.paragraphStyle,
-                                     value: typography.headingParagraph(level), range: lineRange)
-                storage.addAttribute(.glaukHeadingLevel, value: level, range: lineRange)
+                // ★ 中身ができるまでは見出しとして組まない。`### ` と打った直後に
+                //   見出しの字送りを当てると、まだ何も無い行に本文2行ぶんの空白が
+                //   現れて、そこだけ様子がおかしく見える。マーカーは隠すので、
+                //   打っている本人にはただの空行に見える。
+                if Self.lineHasContent(besides: span.range, in: ns) {
+                    storage.addAttribute(.font, value: typography.heading(level), range: lineRange)
+                    storage.addAttribute(.paragraphStyle,
+                                         value: typography.headingParagraph(level), range: lineRange)
+                    storage.addAttribute(.glaukHeadingLevel, value: level, range: lineRange)
+                }
                 if !onCursorLine { storage.addAttribute(.glaukHidden, value: true, range: span.range) }
 
             case .boldMarker:
