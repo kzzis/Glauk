@@ -19,9 +19,15 @@ struct EditorTypography {
     /// ここがズレると applySpans が全文の .font を上書きしてしまい、等幅で書いているつもりが
     /// プロポーショナルで表示される(太字の差も分かりにくくなる)。
     var body = GlaukFont.body(size: 16)
-    var heading: (Int) -> NSFont = { level in
-        let sizes: [CGFloat] = [28, 22, 18, 16, 15, 15]
-        return GlaukFont.heading(level: level, size: sizes[min(max(level, 1), 6) - 1])
+
+    /// 見出しの大きさ。★ 本文からの比で持つ。絶対値で書いていたときは
+    ///   本文を 15pt から 16pt に上げた時点で H4 が本文と同じ、H5・H6 は
+    ///   本文より小さい、という状態になっていた。比なら崩れない。
+    ///   1段ごとにおよそ 1.2 倍。隣り合う見出しが見分けられる最小の差。
+    func heading(_ level: Int) -> NSFont {
+        let scale: [CGFloat] = [1.90, 1.55, 1.30, 1.15, 1.06, 1.00]
+        let size = (body.pointSize * scale[min(max(level, 1), 6) - 1]).rounded()
+        return GlaukFont.heading(level: level, size: size)
     }
     /// システム等幅フォントに対しては、NSFontManager の変換もディスクリプタの .bold も
     /// **Semibold(weight 0.30)** しか返さず「太くなっていない」ように見える。
