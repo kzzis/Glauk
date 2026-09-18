@@ -52,9 +52,11 @@ struct MarkdownTextView: NSViewRepresentable {
         layoutManager.diffRemovedBgColor = typography.codeRemovedBg
         layoutManager.diffAddedBarColor = typography.codeAdded
         layoutManager.diffRemovedBarColor = typography.codeRemoved
-        layoutManager.levelLabelColor = typography.levelLabel
-        layoutManager.levelLabelFont = typography.levelLabelFont
         layoutManager.ruleColor = typography.hrLine
+        if let editor = textView as? EditorTextView {
+            editor.levelLabelColor = typography.levelLabel
+            editor.levelLabelFont = typography.levelLabelFont
+        }
 
         // --- 紙とインク ---
         textView.backgroundColor = ThemeToken.NS.paper
@@ -91,7 +93,8 @@ struct MarkdownTextView: NSViewRepresentable {
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = false
         textView.autoresizingMask = NSView.AutoresizingMask.width
-        textView.textContainerInset = NSSize(width: 32, height: 32)
+        // 横の余白は行長を 720pt に抑えるために EditorTextView が計算し直す
+        textView.textContainerInset = NSSize(width: 32, height: 40)
         // ★ これが無いと maxSize は生成時のフレーム高さのまま = 表示領域の高さで頭打ちになり、
         //   本文がそれより長くてもテキストビューが伸びない(実測: 本文2545ptに対しフレーム660pt)。
         //   さらに scrollCurrentLineToCenter の maxY が 0 になるため、
@@ -103,10 +106,10 @@ struct MarkdownTextView: NSViewRepresentable {
         textView.font = typography.body
         applyTypography(typography, to: layoutManager, textView: textView)
 
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.lineHeightMultiple = 1.55
-        textView.defaultParagraphStyle = paragraph
-        textView.typingAttributes[.paragraphStyle] = paragraph
+        // ★ EditorTypography.bodyParagraph と必ず同じものを使う。
+        //   別々に書くと、打っている最中と塗り直した後で行間が変わる。
+        textView.defaultParagraphStyle = typography.bodyParagraph
+        textView.typingAttributes[.paragraphStyle] = typography.bodyParagraph
 
         textView.string = text
         context.coordinator.textView = textView
