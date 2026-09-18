@@ -18,7 +18,7 @@ struct EditorTypography {
     /// MarkdownTextView が textView.font に入れているものと必ず揃えること。
     /// ここがズレると applySpans が全文の .font を上書きしてしまい、等幅で書いているつもりが
     /// プロポーショナルで表示される(太字の差も分かりにくくなる)。
-    var body = GlaukFont.body(size: 15)
+    var body = GlaukFont.body(size: 16)
     var heading: (Int) -> NSFont = { level in
         let sizes: [CGFloat] = [28, 22, 18, 16, 15, 15]
         return GlaukFont.heading(level: level, size: sizes[min(max(level, 1), 6) - 1])
