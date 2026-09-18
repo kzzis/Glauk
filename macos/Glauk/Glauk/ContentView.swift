@@ -1,5 +1,6 @@
 // ContentView.swift
 import SwiftUI
+import AppKit
 
 struct ContentView: View {
     @EnvironmentObject var noteIndex: NoteIndex
@@ -16,6 +17,9 @@ struct ContentView: View {
     @State private var showAgent = false
     /// ★ @AppStorage は Int32 を扱えないので Int で持つ
     @AppStorage("glauk.defaultAgent") private var defaultAgent = Int(AgentKind.claude.rawValue)
+    /// 紙 / 夜 / システム追従
+    @AppStorage(ThemePreference.storageKey) private var theme = ThemePreference.auto.rawValue
+    @AppStorage(GlaukTheme.storageKey) private var palette = GlaukTheme.paper.rawValue
     /// 名前を尋ねるダイアログ(新規ノート / 新規フォルダ / 名前を変更)
     @State private var namePrompt: NamePrompt?
     @State private var nameInput = ""
@@ -63,6 +67,7 @@ struct ContentView: View {
                                  loadRevision: document.revision,
                                  indexRevision: noteIndex.revision,
                                  externalEdit: document.lastExternalEdit,
+                                 themeID: palette,
                                  onOpenNote: { name in
                                      Task { await navigator.follow(link: name) }
                                  })
@@ -81,6 +86,13 @@ struct ContentView: View {
             }
         }
         .frame(minWidth: 900, minHeight: 700)
+        .preferredColorScheme(ThemePreference(rawValue: theme)?.colorScheme)
+        // ★ SwiftUI の外にある NSWindow にも伝える。ここを忘れると
+        //   タイトルバーだけ元のテーマのまま残る。
+        .onChange(of: theme) { _, newValue in
+            ThemePreference.apply(ThemePreference(rawValue: newValue) ?? .auto,
+                                  to: NSApp.keyWindow)
+        }
         .overlay {
             if showSwitcher {
                 NoteSwitcherView(
@@ -215,6 +227,17 @@ struct ContentView: View {
                     .lineLimit(1)
             }
             vaultButton
+            // ★ 設定は ⌘, とアプリメニューからも開けるが、そこに気づけるとは
+            //   限らない。テーマの入口をここにも出しておく。
+            SettingsLink {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 13, weight: .regular))
+                    .frame(width: 26, height: 22)
+                    .contentShape(Rectangle())
+                    .foregroundStyle(Color.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("設定 (⌘,)")
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
@@ -231,9 +254,9 @@ struct ContentView: View {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.system(size: 13))
-                .foregroundStyle(active ? Color.accentColor : Color.primary)
+                .foregroundStyle(active ? Color.primary : Color.secondary)
                 .frame(width: 26, height: 22)
-                .background(active ? Color.accentColor.opacity(0.15) : .clear,
+                .background(active ? Color.primary.opacity(0.08) : .clear,
                             in: RoundedRectangle(cornerRadius: 5))
                 .contentShape(Rectangle())
         }

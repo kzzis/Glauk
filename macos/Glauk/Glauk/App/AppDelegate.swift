@@ -20,6 +20,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 .environmentObject(noteIndex)
                 .environmentObject(notesFolder)
         )
+        // ★ 保存されているテーマを、SwiftUI が立ち上がる前に窓へ入れておく。
+        //   後から入れると、一瞬だけ OS のテーマで描かれて切り替わる。
+        ThemePreference.apply(.current, to: overlay.window)
         installStatusItem()
 
         hotKey.onTrigger = { [weak self] in self?.overlay.toggle() }
@@ -49,6 +52,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                               action: #selector(openFromMenu), keyEquivalent: "")
         open.target = self          // ★ これが無いと項目がグレーアウトして押せない
         menu.addItem(open)
+        let settings = NSMenuItem(title: "設定…", action: #selector(openSettings), keyEquivalent: ",")
+        settings.target = self
+        menu.addItem(settings)
         menu.addItem(.separator())
         let quit = NSMenuItem(title: "終了", action: #selector(quitApp), keyEquivalent: "q")
         quit.target = self
@@ -58,5 +64,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func openFromMenu() { overlay.show() }
+
+    /// ★ SwiftUI の Settings シーンを AppKit 側から開く。公開APIが無いので
+    ///   セレクタを投げる。名前が版で変わっているため両方試す。
+    @objc private func openSettings() {
+        NSApp.activate(ignoringOtherApps: true)
+        for name in ["showSettingsWindow:", "showPreferencesWindow:"] {
+            if NSApp.sendAction(Selector((name)), to: nil, from: nil) { return }
+        }
+    }
     @objc private func quitApp() { NSApp.terminate(nil) }
 }

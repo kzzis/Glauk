@@ -23,6 +23,11 @@ final class MarkdownLayoutManager: NSLayoutManager {
     var diffRemovedBgColor = NSColor.systemRed.withAlphaComponent(0.14)
     var diffAddedBarColor = NSColor.systemGreen
     var diffRemovedBarColor = NSColor.systemRed
+    /// 見出しの左に出す "H1" ラベル
+    var levelLabelColor = NSColor.tertiaryLabelColor
+    var levelLabelFont = NSFont.monospacedSystemFont(ofSize: 9, weight: .regular)
+    /// ★ 常時出すか、やめるか。仕様書の未決事項なので触り比べられるようにしておく。
+    var showsLevelLabels = true
 
     /// 属性が連続している範囲ごとに、その行たちを囲む矩形を返す
     private func blockRects(for key: NSAttributedString.Key,
@@ -136,6 +141,29 @@ final class MarkdownLayoutManager: NSLayoutManager {
                                                                       effectiveRange: nil) else { return }
         let charRange = characterRange(forGlyphRange: glyphsToShow, actualGlyphRange: nil)
         let fullWidth = container.size.width - container.lineFragmentPadding * 2
+
+        // --- 見出しの左マージンに "H1" ---
+        // ★ 本文の外(左の余白)に描く。字下げを入れて本文をずらすと、
+        //   見出し行だけ行頭が動いて落ち着かない。
+        if showsLevelLabels {
+            storage.enumerateAttribute(.glaukHeadingLevel, in: charRange) { value, range, _ in
+                guard let level = value as? Int else { return }
+                let glyphs = self.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+                var rect = self.boundingRect(forGlyphRange: glyphs, in: container)
+                guard !rect.isEmpty else { return }
+                let label = "H\(level)" as NSString
+                let attrs: [NSAttributedString.Key: Any] = [
+                    .font: self.levelLabelFont,
+                    .foregroundColor: self.levelLabelColor,
+                ]
+                let size = label.size(withAttributes: attrs)
+                // 見出しは大きいので、上端ではなく1行目のベースライン寄りに置く
+                let baseline = rect.minY + (self.levelLabelFont.ascender + rect.height * 0.34)
+                label.draw(at: NSPoint(x: origin.x + container.lineFragmentPadding - size.width - 8,
+                                       y: baseline - size.height),
+                           withAttributes: attrs)
+            }
+        }
 
         // --- コードブロック: 横幅いっぱいの角丸で塗り、右上に言語名を出す ---
         for (range, rect) in blockRects(for: .glaukCodeBlock, in: charRange, origin: origin) {

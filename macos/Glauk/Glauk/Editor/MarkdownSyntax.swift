@@ -72,6 +72,8 @@ extension NSAttributedString.Key {
     static let glaukDiff = NSAttributedString.Key("glauk.diff")
     /// テーブルの縦罫線を引くx座標(テキストコンテナ基準)。値は [NSNumber]
     static let glaukTableColumns = NSAttributedString.Key("glauk.tableColumns")
+    /// 見出しのレベル(1〜6)。左マージンの "H1" ラベルを描くために使う
+    static let glaukHeadingLevel = NSAttributedString.Key("glauk.headingLevel")
 }
 
 enum MarkdownParser {

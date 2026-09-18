@@ -115,7 +115,7 @@ struct NoteSwitcherView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
-        .background(selected ? Color.accentColor.opacity(0.22) : .clear)
+        .background(selected ? Color.primary.opacity(0.10) : .clear)
     }
 
     private func message<Content: View>(

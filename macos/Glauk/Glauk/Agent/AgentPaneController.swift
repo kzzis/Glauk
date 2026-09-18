@@ -35,9 +35,11 @@ final class AgentPaneController: NSObject, ObservableObject {
     @Published private(set) var contextFile: String?
 
     override init() {
-        terminalView = TerminalView(frame: NSRect(x: 0, y: 0, width: 420, height: 400), font: nil)
+        terminalView = TerminalView(frame: NSRect(x: 0, y: 0, width: 420, height: 400),
+                                    font: GlaukFont.mono(size: 12))
         super.init()
         terminalView.terminalDelegate = self
+        applyTheme()
         pty.onOutput = { [weak self] chunk in
             guard let self else { return }
             self.terminalView.feed(byteArray: chunk)
@@ -74,6 +76,20 @@ final class AgentPaneController: NSObject, ObservableObject {
         // ★ 起動直後の大きさは spawn 側の 24x80 のまま。SwiftTerm がレイアウトの
         //   たびに sizeChanged を投げてくるので、そこで実寸に直る。
         //   ここで公開されていない内部APIを覗きに行かない。
+    }
+
+    /// エディタと同じ紙とインクにする。
+    /// ★ ANSI の16色までは作り込まない。エージェントの出力が読めればよく、
+    ///   凝りすぎると仕様書の「カスタマイズ自由度より完成度優先」から外れる。
+    /// ★ nativeBackgroundColor は CGColor に変換されて layer に入る = その時点の
+    ///   外観で固定される。動的な色を渡すだけでは追随しないので、テーマが
+    ///   変わったら呼び直す必要がある。
+    func applyTheme() {
+        let appearance = terminalView.effectiveAppearance
+        appearance.performAsCurrentDrawingAppearance {
+            terminalView.nativeBackgroundColor = ThemeToken.NS.paper
+            terminalView.nativeForegroundColor = ThemeToken.NS.ink
+        }
     }
 
     /// 画面を消す。SwiftTerm に「まっさらに戻す」APIは無いので、

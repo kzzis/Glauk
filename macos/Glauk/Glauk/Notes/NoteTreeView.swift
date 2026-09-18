@@ -126,18 +126,20 @@ struct NoteTreeView: View {
             }
             Image(systemName: node.isFolder ? "folder" : "doc.text")
                 .font(.system(size: 11))
-                .foregroundStyle(isCurrent ? Color.accentColor : .secondary)
+                // ★ チロームは無彩色に保つ(仕様書「色はコンテンツと注釈だけが持つ」)。
+                //   「今ここ」は色ではなく明度と太さで示す。
+                .foregroundStyle(isCurrent ? Color.primary : .secondary)
             Text(node.name)
                 .lineLimit(1)
                 .truncationMode(.middle)
-                .foregroundStyle(isCurrent ? Color.accentColor : Color.primary)
+                .foregroundStyle(Color.primary)
                 .fontWeight(isCurrent ? .semibold : .regular)
             Spacer(minLength: 0)
         }
         .padding(.leading, CGFloat(row.depth) * 12 + 8)
         .padding(.trailing, 8)
         .padding(.vertical, 3)
-        .background(isCurrent ? Color.accentColor.opacity(0.15) : .clear)
+        .background(isCurrent ? Color.primary.opacity(0.08) : .clear)
         // ★ 行全体を当たり判定にする。フォルダは名前のどこを押しても開閉する
         //   (三角だけしか反応しないのは狙いにくい)。
         .contentShape(Rectangle())
