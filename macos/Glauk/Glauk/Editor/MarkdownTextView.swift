@@ -3,6 +3,21 @@ import SwiftUI
 import AppKit
 
 struct MarkdownTextView: NSViewRepresentable {
+    /// カーソルがある行に、記法をそのまま見せるかどうか。
+    ///
+    /// ★ false = 打った瞬間に変換する(Typora の打ち心地)。
+    ///   true にすると Obsidian と同じ「カーソル行だけソースが見える」に戻る。
+    ///   仕様書の初版は true 前提だったが、`- ` を打っても中黒にならないのは
+    ///   壊れているように感じる、という理由で false にした。
+    ///   代償として、`**` の内側にカーソルを置いてもどこからどこまでが装飾なのか
+    ///   見えなくなる。
+    static let showsSourceOnCursorLine = false
+
+    /// 塗り直しに渡すカーソル行。即変換のときは「カーソル行は無い」ことにする。
+    static func activeLine(_ line: @autoclosure () -> NSRange) -> NSRange? {
+        showsSourceOnCursorLine ? line() : nil
+    }
+
     @Binding var text: String
     var noteIndex: NoteIndex
     /// ファイルを開くたびに増える値。これが変わったら、テキストビューが
@@ -151,8 +166,8 @@ struct MarkdownTextView: NSViewRepresentable {
             if let storage = textView.textStorage {
                 let ns = textView.string as NSString
                 let selection = textView.selectedRange().clamped(to: ns.length)
-                context.coordinator.highlighter.apply(to: storage,
-                                                      cursorLine: ns.lineRange(for: selection))
+                context.coordinator.highlighter.apply(
+                    to: storage, cursorLine: Self.activeLine(ns.lineRange(for: selection)))
             }
             textView.needsDisplay = true
         }
@@ -165,8 +180,8 @@ struct MarkdownTextView: NSViewRepresentable {
             if let storage = textView.textStorage {
                 let ns = textView.string as NSString
                 let selection = textView.selectedRange().clamped(to: ns.length)
-                context.coordinator.highlighter.apply(to: storage,
-                                                      cursorLine: ns.lineRange(for: selection))
+                context.coordinator.highlighter.apply(
+                    to: storage, cursorLine: Self.activeLine(ns.lineRange(for: selection)))
             }
         }
 
@@ -219,8 +234,8 @@ struct MarkdownTextView: NSViewRepresentable {
         context.coordinator.suppressTypewriterScroll = false
 
         if let storage = textView.textStorage {
-            // cursorLine を nil にするとカーソル行のマーカーまで隠れてしまう
-            let cursorLine = ns.lineRange(for: NSRange(location: safeLocation, length: 0))
+            let cursorLine = Self.activeLine(
+                ns.lineRange(for: NSRange(location: safeLocation, length: 0)))
             context.coordinator.highlighter.apply(to: storage, cursorLine: cursorLine)
         }
 
@@ -412,7 +427,8 @@ struct MarkdownTextView: NSViewRepresentable {
 
             let ns = storage.string as NSString
             let selection = textView.selectedRange().clamped(to: ns.length)
-            let cursorLine = ns.lineRange(for: selection)
+            // ★ 即変換のときは nil。これが「カーソル行だけソースを見せる」の唯一の分岐。
+            let cursorLine = MarkdownTextView.activeLine(ns.lineRange(for: selection))
 
             if let edited = pendingEditedRange {
                 pendingEditedRange = nil
@@ -420,6 +436,9 @@ struct MarkdownTextView: NSViewRepresentable {
                                              editedRange: edited.clamped(to: ns.length),
                                              cursorLine: cursorLine)
             }
+            // ★ 即変換のときは、カーソルが動いても見た目は変わらない。
+            //   行の塗り直しは要らないので、打鍵ごとの仕事をそのぶん減らす。
+            guard let cursorLine else { return }
             // カーソルが移った先と、離れた行の両方を塗り直す(ソース表示の切り替え)
             if let previous = lastCursorLine, previous != cursorLine {
                 highlighter.applySpans(to: storage, in: previous, cursorLine: cursorLine)
