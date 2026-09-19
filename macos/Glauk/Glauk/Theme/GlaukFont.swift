@@ -35,8 +35,15 @@ enum GlaukFont {
         return NSFont.systemFont(ofSize: size)
     }
 
-    /// コードと AIペイン
+    /// コードと AIペイン。
+    /// ★ 落ち先を必ず等幅にする。`first` の落ち先はシステムフォント
+    ///   (プロポーショナル)なので、IBM Plex Mono が入っていない環境では
+    ///   ターミナルの桁が揃わなくなる。等幅であることは、ここでは
+    ///   見た目の好み以前の前提条件。
     static func mono(size: CGFloat = 13) -> NSFont {
-        first(["IBMPlexMono", "IBMPlexMono-Regular"], size: size)
+        for name in ["IBMPlexMono", "IBMPlexMono-Regular"] {
+            if let f = NSFont(name: name, size: size) { return f }
+        }
+        return NSFont.monospacedSystemFont(ofSize: size, weight: .regular)
     }
 }
