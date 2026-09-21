@@ -1,8 +1,7 @@
-// ThemePreference.swift
 import SwiftUI
 import AppKit
 
-/// 明るい側か暗い側か。★ 配色そのものは GlaukTheme が持つ。こちらは
+/// 明るい側か暗い側か。配色そのものは GlaukTheme が持つ。こちらは
 /// 「どちらの面を使うか」だけを決める。
 enum ThemePreference: String, CaseIterable, Identifiable {
     case auto, light, dark
@@ -40,7 +39,7 @@ enum ThemePreference: String, CaseIterable, Identifiable {
         ThemePreference(rawValue: UserDefaults.standard.string(forKey: storageKey) ?? "") ?? .auto
     }
 
-    /// ★ `.preferredColorScheme` は SwiftUI の階層にしか効かない。
+    /// `.preferredColorScheme` は SwiftUI の階層にしか効かない。
     ///   自前で持っている NSWindow にも同じ設定を入れないと、
     ///   タイトルバーだけ色が違う、という状態になる。
     static func apply(_ preference: ThemePreference, to window: NSWindow?) {

@@ -1,4 +1,3 @@
-// MarkdownSyntax.swift
 import AppKit
 import GlaukCore
 
@@ -85,7 +84,7 @@ enum MarkdownParser {
         guard let raw = bytes.withUnsafeBufferPointer({ buf in
             glauk_parse_spans(buf.baseAddress, buf.count, &count)
         }) else { return [] }
-        defer { glauk_free_spans(raw, count) }   // ★ 取得の直後に解放を予約
+        defer { glauk_free_spans(raw, count) }
 
         var result: [Span] = []
         result.reserveCapacity(count)

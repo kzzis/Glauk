@@ -1,4 +1,3 @@
-// FileWatcher.swift
 import Combine
 import Foundation
 import GlaukCore
@@ -9,10 +8,7 @@ import GlaukCore
 final class FileWatcher: ObservableObject {
     var onExternalChange: ((String) -> Void)?
 
-    /// ★ 古いスレッドの通知を捨てるための世代番号。
-    ///   glauk_watch_next_external_change はブロッキングなので、
-    ///   別のノートに移っても前のスレッドはすぐには止まらない。
-    ///   「止められないなら、無視できるようにする」。
+    /// 監視のブロッキング呼び出しは即停止できないため、世代番号で古い通知を捨てる。
     private var generation = 0
 
     func watch(path: String?) {

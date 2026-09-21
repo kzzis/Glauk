@@ -1,183 +1,16 @@
-// SyntaxHighlighter.swift
 import AppKit
 
-/// ライト/ダークで色を切り替える。Step 9 で Asset Catalog のColor Setに移す。
-func dynamicColor(dark: UInt32, light: UInt32) -> NSColor {
-    func make(_ hex: UInt32) -> NSColor {
-        NSColor(srgbRed: CGFloat((hex >> 16) & 0xFF) / 255,
-                green: CGFloat((hex >> 8) & 0xFF) / 255,
-                blue: CGFloat(hex & 0xFF) / 255,
-                alpha: 1)
-    }
-    return NSColor(name: nil) { appearance in
-        appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? make(dark) : make(light)
-    }
-}
-
-struct EditorTypography {
-    /// MarkdownTextView が textView.font に入れているものと必ず揃えること。
-    /// ここがズレると applySpans が全文の .font を上書きしてしまい、等幅で書いているつもりが
-    /// プロポーショナルで表示される(太字の差も分かりにくくなる)。
-    var body = GlaukFont.body(size: 16)
-    var heading: (Int) -> NSFont = { level in
-        let sizes: [CGFloat] = [28, 22, 18, 16, 15, 15]
-        return GlaukFont.heading(level: level, size: sizes[min(max(level, 1), 6) - 1])
-    }
-    /// システム等幅フォントに対しては、NSFontManager の変換もディスクリプタの .bold も
-    /// **Semibold(weight 0.30)** しか返さず「太くなっていない」ように見える。
-    /// 変換結果のウェイトを確かめ、bold に届かなければ等幅の bold ウェイト(0.40)を使う。
-    var bold: (NSFont) -> NSFont = { base in
-        let converted = NSFontManager.shared.convert(base, toHaveTrait: .boldFontMask)
-        let traits = converted.fontDescriptor.object(forKey: .traits) as? [NSFontDescriptor.TraitKey: Any]
-        let weight = (traits?[.weight] as? CGFloat) ?? 0
-        if weight >= NSFont.Weight.bold.rawValue { return converted }
-        return NSFont.monospacedSystemFont(ofSize: base.pointSize, weight: .bold)
-    }
-    var accent = ThemeToken.NS.accent
-    var muted = ThemeToken.NS.quote
-    var ink = ThemeToken.NS.ink
-    /// 見出しの左に出す "H1" ラベル
-    var levelLabel = ThemeToken.NS.levelLabel
-    var levelLabelFont = GlaukFont.mono(size: 9)
-    /// `---` の区切り線
-    var hrLine = ThemeToken.NS.hr
-    /// コードは本文より少し小さい等幅。本文が既に等幅なのでフォント自体は同系だが、
-    /// Step 9 で本文がサンセリフになったときにここだけ等幅で残るように分けておく。
-    var code = GlaukFont.mono(size: 14)
-    /// 「たたむ」ためのフォント。グリフを消すだけでは行が1行分残るため(実測: 4行が1行分残った)、
-    /// 極小フォントを併用して行の高さごと潰す。
-    var folded = NSFont.systemFont(ofSize: 0.01)
-    /// 隠した ``` の行に使う。行は残るので、これがブロック上下の余白の高さになる。
-    var codePadding = NSFont.systemFont(ofSize: 7)
-
-    /// 斜体は「フォントの差し替え」ではなく「傾き」で表す。
-    /// ★ 日本語には斜体を持つフォントが無いため、斜体フォントを指定しても AppKit の
-    ///   属性補正が日本語を描けるフォント(HiraKaku)へ差し替え、斜体が消える。
-    ///   実測: "latin" → …Monospaced-RegularItalic のまま / "日本語" → HiraKaku-W4(italic=false)。
-    ///   obliqueness ならフォントに関係なく効く。
-    var italicObliqueness: CGFloat = 0.2
-
-    // --- コードのシンタックスハイライト ---
-    // ライト/ダークで色を切り替える。暗い側は GitHub Dark 系の配色に寄せている。
-    var codeKeyword = dynamicColor(dark: 0xFF7B72, light: 0xCF222E) // var / let など
-    var codeType = dynamicColor(dark: 0x4EC9B0, light: 0x0F766E) // 大文字始まりの識別子
-    var codeFunction = dynamicColor(dark: 0x79C0FF, light: 0x0969DA) // 呼び出し
-    var codeString = dynamicColor(dark: 0xE3B341, light: 0x8B5000)
-    var codeNumber = dynamicColor(dark: 0xFFA657, light: 0xB35900)
-    var codeComment = NSColor.secondaryLabelColor
-    /// ブロック右上に出す言語名
-    var codeLangLabel = ThemeToken.NS.quote
-    // --- diff ---
-    var codeAdded = dynamicColor(dark: 0x7EE787, light: 0x116329)
-    var codeRemoved = dynamicColor(dark: 0xFFA198, light: 0x82071E)
-    var codeMeta = dynamicColor(dark: 0x8B949E, light: 0x57606A)
-    var codeAddedBg = dynamicColor(dark: 0x0F3A20, light: 0xDAFBE1)
-    var codeRemovedBg = dynamicColor(dark: 0x4A1418, light: 0xFFEBE9)
-
-    /// 引用の縦棒の色と太さ
-    var quoteBar = ThemeToken.NS.accent
-    var quoteBarWidth: CGFloat = 2
-
-    /// 行の高さ。★ 全部の段落スタイルで揃えること。ここがバラつくと、
-    ///   リストと本文が隣り合ったときに行が踊って見える。
-    static let lineHeight: CGFloat = 1.7
-
-    /// MarkdownTextView の defaultParagraphStyle と必ず揃えること
-    var bodyParagraph: NSParagraphStyle = {
-        let p = NSMutableParagraphStyle()
-        p.lineHeightMultiple = EditorTypography.lineHeight
-        // 段落の切れ目に息継ぎを作る。行間だけ広げると、どこで段落が
-        // 変わったのか分からなくなる。
-        p.paragraphSpacing = 8
-        return p
-    }()
-
-    /// 見出しは上に大きく空ける。下は詰める。
-    /// ★ 見出しは「次の段落の頭」なので、上下同じだけ空けるとどちらに
-    ///   属しているのか分からなくなる。
-    var headingParagraph: (Int) -> NSParagraphStyle = { level in
-        let before: [CGFloat] = [30, 26, 22, 18, 16, 16]
-        let p = NSMutableParagraphStyle()
-        p.lineHeightMultiple = 1.25          // 大きい字は行間を詰める方が締まる
-        p.paragraphSpacingBefore = before[min(max(level, 1), 6) - 1]
-        p.paragraphSpacing = 6
-        return p
-    }
-    /// 引用は字下げして、空いた左側に縦棒を描く
-    var quoteParagraph: NSParagraphStyle = {
-        let p = NSMutableParagraphStyle()
-        p.lineHeightMultiple = EditorTypography.lineHeight
-        p.firstLineHeadIndent = 16
-        p.headIndent = 16
-        return p
-    }()
-    /// リストは折り返した2行目以降がマーカーの右に揃うようにする。
-    /// `level` は字下げの段数(入れ子の深さ)。Obsidian と同じく段ごとに下げる。
-    var listParagraph: (Int) -> NSParagraphStyle = { level in
-        let step: CGFloat = 20
-        let base = step * CGFloat(level)
-        let p = NSMutableParagraphStyle()
-        p.lineHeightMultiple = EditorTypography.lineHeight
-        p.firstLineHeadIndent = base
-        p.headIndent = base + step
-        return p
-    }
-    /// コードブロック / テーブルは角丸の内側に余白を作り、行間も詰める
-    var codeParagraph: NSParagraphStyle = {
-        let p = NSMutableParagraphStyle()
-        p.lineHeightMultiple = 1.35
-        p.firstLineHeadIndent = 20
-        p.headIndent = 20
-        p.tailIndent = -20
-        return p
-    }()
-
-    /// コードブロックの角丸の丸み
-    var codeCornerRadius: CGFloat = 6
-    var inlineCodeCornerRadius: CGFloat = 3
-    /// テーブルの罫線
-    var tableRule = ThemeToken.NS.hr
-    var codeBg = ThemeToken.NS.codeBg
-    var codeBorder = ThemeToken.NS.codeBorder
-
-    // --- Obsidian 互換の記法 ---
-    /// ==ハイライト== の下地。蛍光ペン風に薄く敷く
-    var highlightBg = dynamicColor(dark: 0x5C4B00, light: 0xFFF3A3)
-    /// #タグ。角丸の下地に少し濃い文字
-    var tagText = dynamicColor(dark: 0x9BD1FF, light: 0x0A5BA8)
-    var tagBg = dynamicColor(dark: 0x1E3A5F, light: 0xDCEBFB)
-    var tagCornerRadius: CGFloat = 4
-    /// %%コメント%% は「出ない」ものなので、あることだけ分かる程度に薄くする
-    var commentText = NSColor.tertiaryLabelColor
-    /// $数式$ は等幅寄りにして本文と区別する
-    var math = GlaukFont.mono(size: 14)
-    var mathText = dynamicColor(dark: 0xC3A6FF, light: 0x6B21A8)
-    /// 脚注 [^1] とブロックID ^abc は小さく薄く
-    var superscript = NSFont.systemFont(ofSize: 10)
-    /// チェックボックス
-    var checkboxSize: CGFloat = 13
-    var checkboxOn = NSColor.controlAccentColor
-    var checkboxOff = NSColor.tertiaryLabelColor
-    /// 中黒(リストの `-` の代わりに描く)
-    var bulletColor = NSColor.secondaryLabelColor
-    var bulletRadius: CGFloat = 2
-
-    /// コールアウトの色。Obsidian の種類名に合わせる
-    var calloutTint: (String) -> NSColor = { type in
-        switch type.lowercased() {
-        case "warning", "caution", "attention": return .systemOrange
-        case "danger", "error", "bug", "failure", "fail", "missing": return .systemRed
-        case "success", "check", "done", "tip", "hint", "important": return .systemGreen
-        case "question", "help", "faq": return .systemPurple
-        case "example": return .systemPink
-        case "quote", "cite": return .systemGray
-        default: return .systemBlue      // note / info / todo / abstract …
-        }
-    }
-}
-
 final class SyntaxHighlighter {
-    /// ★ テーマを切り替えると色ごと入れ替わる。let にすると差し替えられない。
+    /// 空の見出し行に余白を作らないよう、マーカー以外の内容を確認する。
+    static func lineHasContent(besides marker: NSRange, in ns: NSString) -> Bool {
+        let line = ns.lineRange(for: marker)
+        let after = NSRange(location: NSMaxRange(marker),
+                            length: max(0, NSMaxRange(line) - NSMaxRange(marker)))
+        guard after.length > 0 else { return false }
+        return !ns.substring(with: after)
+            .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     var typography: EditorTypography
     /// 未作成ノートの区別表示に使う。Coordinator から NoteIndex を差し込む
     var noteExists: (String) -> Bool = { _ in true }
@@ -191,7 +24,7 @@ final class SyntaxHighlighter {
 
     /// `scope` の範囲だけを再計算する
     ///
-    /// ★ 実際に塗る範囲は、コードフェンスとフロントマターの境界まで広げる。
+    /// 実際に塗る範囲は、コードフェンスとフロントマターの境界まで広げる。
     ///   途中で切ると開きの ``` や --- が見えないまま解析することになり、
     ///   中身が通常のMarkdownとして解釈されてしまう。カーソル行だけを塗り直す
     ///   呼び出し(カーソルの出入り)でも同じ拡張が要るので、ここで面倒を見る。
@@ -231,7 +64,7 @@ final class SyntaxHighlighter {
         storage.removeAttribute(.glaukTableColumns, range: scope)
         storage.addAttribute(.paragraphStyle, value: typography.bodyParagraph, range: scope)
 
-        // ★ Obsidian と同じ考え方: カーソルがテーブルの中にある間は原文のまま見せ、
+        // Obsidian と同じ考え方: カーソルがテーブルの中にある間は原文のまま見せ、
         //   外に出たら罫線の表に切り替える。行単位で切り替えると、カーソル行だけ
         //   `|` が見えて桁がずれるため、テーブル全体で判定する。
         let cursorTable = cursorLine.flatMap { tableRange(in: ns, touching: $0) }
@@ -262,10 +95,16 @@ final class SyntaxHighlighter {
                     ? Int(span.kind.rawValue)
                     : Int(span.kind.rawValue) - 29
                 let lineRange = (storage.string as NSString).lineRange(for: span.range)
-                storage.addAttribute(.font, value: typography.heading(level), range: lineRange)
-                storage.addAttribute(.paragraphStyle,
-                                     value: typography.headingParagraph(level), range: lineRange)
-                storage.addAttribute(.glaukHeadingLevel, value: level, range: lineRange)
+                // 中身ができるまでは見出しとして組まない。`### ` と打った直後に
+                //   見出しの字送りを当てると、まだ何も無い行に本文2行ぶんの空白が
+                //   現れて、そこだけ様子がおかしく見える。マーカーは隠すので、
+                //   打っている本人にはただの空行に見える。
+                if Self.lineHasContent(besides: span.range, in: ns) {
+                    storage.addAttribute(.font, value: typography.heading(level), range: lineRange)
+                    storage.addAttribute(.paragraphStyle,
+                                         value: typography.headingParagraph(level), range: lineRange)
+                    storage.addAttribute(.glaukHeadingLevel, value: level, range: lineRange)
+                }
                 if !onCursorLine { storage.addAttribute(.glaukHidden, value: true, range: span.range) }
 
             case .boldMarker:
@@ -273,7 +112,7 @@ final class SyntaxHighlighter {
                     let contentStart = NSMaxRange(open.range)
                     let contentRange = NSRange(location: contentStart, length: span.range.location - contentStart)
                     if contentRange.length > 0, NSMaxRange(contentRange) <= storage.length {
-                        // ★ 本文固定ではなく「そこに今入っているフォント」を太らせる。
+                        // 本文固定ではなく「そこに今入っているフォント」を太らせる。
                         //   テーブルのセルはコード用の14ptなので、本文15ptで太らせると行内で大きさがずれる。
                         let base = (storage.attribute(.font, at: contentRange.location,
                                                       effectiveRange: nil) as? NSFont) ?? typography.body
@@ -318,7 +157,7 @@ final class SyntaxHighlighter {
                 storage.addAttribute(.paragraphStyle,
                                      value: typography.listParagraph(indentOf(span, in: ns)),
                                      range: lineRange)
-                // ★ `-` は隠さず透明にする。隠すと幅が0になり、中黒を描く場所が無くなる。
+                // `-` は隠さず透明にする。隠すと幅が0になり、中黒を描く場所が無くなる。
                 //   (テーブルの縦罫線と同じ手)
                 if onCursorLine {
                     storage.addAttribute(.foregroundColor, value: typography.accent, range: span.range)
@@ -393,7 +232,7 @@ final class SyntaxHighlighter {
                 lastCalloutType = type
                 let lineRange = ns.lineRange(for: span.range)
                 storage.addAttribute(.glaukCallout, value: type, range: lineRange)
-                // ★ 帯を描くので引用の縦棒は消す。両方出ると棒が2本並ぶ。
+                // 帯を描くので引用の縦棒は消す。両方出ると棒が2本並ぶ。
                 storage.removeAttribute(.glaukQuote, range: lineRange)
                 // タイトルは色付きの太字にする
                 let titleStart = min(NSMaxRange(span.range) + 1, NSMaxRange(lineRange))
@@ -419,7 +258,7 @@ final class SyntaxHighlighter {
                                      value: added ? typography.codeAdded : typography.codeRemoved,
                                      range: span.range)
                 // 行まるごとの下地は MarkdownLayoutManager が描く。
-                // ★ 改行まで含めないと、折り返しのない短い行で帯が途切れる。
+                // 改行まで含めないと、折り返しのない短い行で帯が途切れる。
                 storage.addAttribute(.glaukDiff, value: added, range: ns.lineRange(for: span.range))
 
             case .codeMeta:
@@ -522,7 +361,7 @@ final class SyntaxHighlighter {
                 if !onCursorLine { storage.addAttribute(.glaukHidden, value: true, range: span.range) }
 
             case .tableHeader, .tableRow:
-                // ★ 改行まで含めた行範囲に目印を付ける。そうしないと行と行の間で属性が切れ、
+                // 改行まで含めた行範囲に目印を付ける。そうしないと行と行の間で属性が切れ、
                 //   テーブル全体ではなく行ごとに枠が描かれてしまう。
                 let lineRange = (storage.string as NSString).lineRange(for: span.range)
                 storage.addAttribute(.glaukTable, value: true, range: lineRange)
@@ -538,7 +377,7 @@ final class SyntaxHighlighter {
                 let lineRange = (storage.string as NSString).lineRange(for: span.range)
                 storage.addAttribute(.glaukTable, value: true, range: lineRange)
                 if !isSourceMode(span.range) {
-                    // ★ 極小フォントは改行まで含めて掛ける。行の中身だけだと、
+                    // 極小フォントは改行まで含めて掛ける。行の中身だけだと、
                     //   末尾の改行が本文サイズのまま残って1行分の隙間になる。
                     storage.addAttribute(.glaukHidden, value: true, range: lineRange)
                     storage.addAttribute(.font, value: typography.folded, range: lineRange)
@@ -548,7 +387,7 @@ final class SyntaxHighlighter {
                 if isSourceMode(span.range) {
                     storage.addAttribute(.foregroundColor, value: typography.tableRule, range: span.range)
                 } else {
-                    // ★ 隠すのではなく透明にする。隠すと文字送りが0になって桁が詰まるので、
+                    // 隠すのではなく透明にする。隠すと文字送りが0になって桁が詰まるので、
                     //   `|` の幅はそのまま列の余白として使い、その位置に縦罫線を描く。
                     storage.addAttribute(.foregroundColor, value: NSColor.clear, range: span.range)
                     storage.addAttribute(.glaukTablePipe, value: true, range: span.range)
@@ -610,7 +449,7 @@ final class SyntaxHighlighter {
         }
 
         // 区切り行を除いた行について、`|` の位置と「行頭からそこまでの幅」を測る。
-        // ★ セルを個別に測って足し合わせると、境目ごとの丸めが積もって数ptずれる。
+        // セルを個別に測って足し合わせると、境目ごとの丸めが積もって数ptずれる。
         //   行頭からの累積で測り、各 `|` を目標位置へ直接合わせる。
         struct Row {
             var pipes: [Int]
@@ -661,10 +500,7 @@ final class SyntaxHighlighter {
             }
         }
 
-        // ★ 罫線は「実際に置かれた `|` の位置」ではなく「列の目標位置」に引く。
-        //   字送りだけで揃えると、CoreText の計測とレイアウトマネージャの組版の差が
-        //   残って行ごとに数ptずれる(実測: 最後の罫線が3.5ptばらついた)。
-        //   目標位置を渡してしまえば、計測誤差があっても罫線は必ず一直線になる。
+        // CoreText と組版の幅の差に影響されないよう、罫線には列の目標位置を渡す。
         let padding = storage.layoutManagers.first?.textContainers.first?.lineFragmentPadding ?? 0
         let left = padding + typography.codeParagraph.firstLineHeadIndent
         var xs: [NSNumber] = [NSNumber(value: Double(left + rows[0].prefix[0]))]
@@ -676,14 +512,7 @@ final class SyntaxHighlighter {
         storage.addAttribute(.glaukTableColumns, value: xs, range: table)
     }
 
-    /// 実際の組版と同じ幅を測る。
-    /// NSAttributedString.size() はレイアウトマネージャの結果と数pt ずれるため、
-    /// 桁揃えに使うと `|` の位置が揃いきらない(実測で最大5ptずれた)。
-    /// 隠した文字を落とした文字列を返す。
-    /// ★ 桁揃えの計測に必須。`.glaukHidden` はグリフを null にして幅を0にする
-    ///   レイアウトマネージャ側の仕組みなので、CoreText で測ると隠した文字まで
-    ///   幅に入ってしまう。セルに `` ` `` や `**` が入っている表で、
-    ///   最後の `|` が最大55ptずれた(実測)。
+    /// CoreText は .glaukHidden を解釈しないため、計測前に隠し文字を取り除く。
     private func visibleText(_ storage: NSTextStorage, in range: NSRange) -> NSAttributedString {
         let out = NSMutableAttributedString()
         storage.enumerateAttribute(.glaukHidden, in: range) { hidden, sub, _ in
@@ -765,7 +594,7 @@ final class SyntaxHighlighter {
            NSIntersectionRange(fm, scope).length > 0 || scope.location <= NSMaxRange(fm) {
             result = result.union(fm)
         }
-        // ★ テーブルは列幅を全行から決めるので、途中で切ると桁揃えが狂う
+        // テーブルは列幅を全行から決めるので、途中で切ると桁揃えが狂う
         if let table = tableRange(in: ns, touching: scope) {
             result = result.union(table)
         }

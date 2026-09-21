@@ -1,24 +1,18 @@
-// OverlayWindow.swift
 import AppKit
 import SwiftUI
 
 /// 使い回すウィンドウ。閉じずに隠すので、次に出すときは組み立て直さなくて済む。
 final class OverlayWindow: NSWindow {
-    /// ★ タイトルバーを隠すと AppKit が「これはパネルだろう」と判断して
-    ///   キーボード入力を受け付けなくなる。明示的に許可する。
-    ///   これを忘れると「窓は出るが文字が打てない」という分かりにくい症状になる。
+    /// タイトルバーのないウィンドウでもキーボード入力を受け付ける。
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
 
-    /// Esc で隠す
     override func cancelOperation(_ sender: Any?) {
         (delegate as? OverlayWindowController)?.hide()
     }
 }
 
 #if DEBUG
-/// 呼び出しからカーソルが出るまでを測るための時計。
-/// 仕様書の受け入れ基準(p95 < 300ms)を実際に確かめる。
 enum SummonClock {
     nonisolated(unsafe) static var startedAt: CFAbsoluteTime = 0
     nonisolated(unsafe) static var waiting = false
@@ -54,8 +48,7 @@ final class OverlayWindowController: NSObject, NSWindowDelegate {
         w.titlebarAppearsTransparent = true
         w.titleVisibility = .hidden
         w.isMovableByWindowBackground = true
-        // ★ 既定では close() でインスタンスごと解放される。show/hide 方式では
-        //   次に makeKeyAndOrderFront した瞬間に解放済みを触って落ちる。
+        // 再表示に使うため、close() でウィンドウを解放しない。
         w.isReleasedWhenClosed = false
         w.delegate = self
         w.contentView = NSHostingView(rootView: rootView)
@@ -83,11 +76,10 @@ final class OverlayWindowController: NSObject, NSWindowDelegate {
             ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
             window.animator().alphaValue = 1
         }, completionHandler: {
-            // ★ アニメーションが走らない状況(非アクティブ時など)でも必ず見える状態にする。
-            //   実測: これが無いと alpha が 0 のまま残り、窓は開いているのに何も見えない。
+            // アニメーションが実行されなくても透明なまま残さない。
             window.alphaValue = 1
         })
-        // ★ show() の直後はまだビュー階層が組み上がっていない。
+        // show() の直後はまだビュー階層が組み上がっていない。
         //   1周期待ってから本文にフォーカスを当てる。
         DispatchQueue.main.async { [weak self] in self?.focusEditor() }
     }
@@ -98,9 +90,7 @@ final class OverlayWindowController: NSObject, NSWindowDelegate {
             ctx.duration = fadeDuration
             window.animator().alphaValue = 0
         }, completionHandler: {
-            // ★ NSApp.hide(nil) は使わない。アプリごと隠れるので、次に
-            //   makeKeyAndOrderFront しても出てこなくなる(実測: 2回目が表示されない)。
-            //   orderOut だけで、フォーカスは自然に前のアプリへ戻る。
+            // NSApp.hide は再表示を妨げるため、ウィンドウだけを隠す。
             window.orderOut(nil)
         })
     }
@@ -111,8 +101,6 @@ final class OverlayWindowController: NSObject, NSWindowDelegate {
         return false
     }
 
-    /// 本文のテキストビューを探して first responder にする。
-    /// SwiftUI 経由で参照を引き回すより、階層を1度歩くほうが壊れにくい。
     private func focusEditor() {
         guard let window, let root = window.contentView else { return }
         guard let editor = Self.firstTextView(in: root) else { return }

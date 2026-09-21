@@ -1,4 +1,3 @@
-// PtySession.swift
 import Foundation
 import GlaukCore
 
@@ -17,22 +16,22 @@ enum AgentKind: Int32, CaseIterable, Identifiable {
 
 /// Zig の PTY を Swift から使うための包み。
 ///
-/// ★ ここには SwiftTerm を持ち込まない。端末の描画とプロセスの世話を分けておくと、
+/// ここには SwiftTerm を持ち込まない。端末の描画とプロセスの世話を分けておくと、
 ///   画面が無くても起動・読み書き・後始末を確かめられる。
 final class PtySession {
     /// 出力が来るたびに呼ばれる。メインスレッドで呼ぶ。
-    /// ★ このプロジェクトは既定が MainActor 隔離。SwiftTerm のデリゲートは
+    /// このプロジェクトは既定が MainActor 隔離。SwiftTerm のデリゲートは
     ///   その外から呼ばれるので、この型は隔離の外に置く必要がある。
     nonisolated(unsafe) var onOutput: ((ArraySlice<UInt8>) -> Void)?
     /// 子が終わったときに1度だけ呼ばれる。メインスレッドで呼ぶ。
     /// `sawAnyOutput` が false なら、1バイトも出さずに落ちた = CLI が見つからない。
     nonisolated(unsafe) var onExit: ((_ sawAnyOutput: Bool) -> Void)?
 
-    /// ★ SwiftTerm のデリゲートは @MainActor の外から呼ばれる。
+    /// SwiftTerm のデリゲートは @MainActor の外から呼ばれる。
     ///   Zig 側の表は Mutex で守られていて、知らないIDには安全に失敗するので、
     ///   ここは並行性チェックの外に置く。
     private nonisolated(unsafe) var id: Int32 = -1
-    /// ★ 画面の大きさは起動より前に届く(SwiftTerm はレイアウト時に sizeChanged を
+    /// 画面の大きさは起動より前に届く(SwiftTerm はレイアウト時に sizeChanged を
     ///   投げ、そのとき PTY はまだ無い)。覚えておいて起動時に渡さないと、
     ///   CLI が 80桁で最初の1画面を描いてしまい、折り返しが崩れたまま残る。
     private nonisolated(unsafe) var lastRows: Int = 24
@@ -60,7 +59,7 @@ final class PtySession {
         guard newId >= 0 else { return false }
         lock.lock(); id = newId; lock.unlock()
 
-        // ★ 終わらないループなので Task ではなくスレッドを1本立てる。
+        // 終わらないループなので Task ではなくスレッドを1本立てる。
         //   async は「待って再開する」モデルで、回り続ける read に合わない。
         let queue = DispatchQueue(label: "glauk.pty.read.\(newId)", qos: .userInitiated)
         queue.async { [weak self] in self?.readLoop(newId) }
@@ -78,11 +77,11 @@ final class PtySession {
             guard n > 0 else { break }      // 0 = EOF(子が終了) / -1 = エラー
             sawAnyOutput = true
             let chunk = Array(buffer[0..<Int(n)])
-            // ★ 受け手は画面を触るので必ずメインスレッドへ戻す。
+            // 受け手は画面を触るので必ずメインスレッドへ戻す。
             //   AppKit はスレッド安全ではなく、忘れると「動くけど時々落ちる」になる。
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
-                // ★ 既に読んでしまった分がメインスレッドの順番待ちに残っている。
+                // 既に読んでしまった分がメインスレッドの順番待ちに残っている。
                 //   エージェントを切り替えた後にそれが流れると、前の会話と
                 //   新しい会話が同じ画面に混ざる。今のセッションの分だけ通す。
                 guard self.sessionId == sessionId else { return }

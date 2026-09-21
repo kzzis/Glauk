@@ -1,11 +1,7 @@
-// AppDelegate.swift
 import AppKit
 import SwiftUI
 
-/// ウィンドウを自分で1つ持ち続ける。SwiftUI の WindowGroup は使わない。
-///
-/// ★ WindowGroup だと、閉じたときに SwiftUI がインスタンスを捨ててしまう。
-///   ⌥Space から数十msで出したいので、作り直さずに show/hide で切り替える。
+/// 再表示時の再構築を避けるため、ウィンドウを保持して show/hide する。
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let overlay = OverlayWindowController()
@@ -20,7 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 .environmentObject(noteIndex)
                 .environmentObject(notesFolder)
         )
-        // ★ 保存されているテーマを、SwiftUI が立ち上がる前に窓へ入れておく。
+        // 保存されているテーマを、SwiftUI が立ち上がる前に窓へ入れておく。
         //   後から入れると、一瞬だけ OS のテーマで描かれて切り替わる。
         ThemePreference.apply(.current, to: overlay.window)
         installStatusItem()
@@ -31,7 +27,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         overlay.show()
     }
 
-    /// Dock アイコンをクリックしたとき
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
         if !hasVisibleWindows { overlay.show() }
         return true
@@ -50,7 +45,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let menu = NSMenu()
         let open = NSMenuItem(title: "Glauk を開く (⌥Space)",
                               action: #selector(openFromMenu), keyEquivalent: "")
-        open.target = self          // ★ これが無いと項目がグレーアウトして押せない
+        open.target = self          // これが無いと項目がグレーアウトして押せない
         menu.addItem(open)
         let settings = NSMenuItem(title: "設定…", action: #selector(openSettings), keyEquivalent: ",")
         settings.target = self
@@ -65,7 +60,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func openFromMenu() { overlay.show() }
 
-    /// ★ SwiftUI の Settings シーンを AppKit 側から開く。公開APIが無いので
+    /// SwiftUI の Settings シーンを AppKit 側から開く。公開APIが無いので
     ///   セレクタを投げる。名前が版で変わっているため両方試す。
     @objc private func openSettings() {
         NSApp.activate(ignoringOtherApps: true)

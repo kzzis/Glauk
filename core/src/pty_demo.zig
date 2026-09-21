@@ -1,8 +1,5 @@
 //! PTY を Swift 抜きで確かめるための小さなCLI。
 //!   zig build pty-demo -- claude
-//!
-//! ★ UIと繋ぐ前にここで確認する。繋いだ状態で調べると
-//!   「Zigが悪いのか SwiftTerm が悪いのか」が分からなくなる。
 const std = @import("std");
 const pty = @import("pty.zig");
 
@@ -26,15 +23,13 @@ pub fn main() !void {
     }
     std.debug.print("spawned session {d} in {s}\n", .{ id, cwd });
 
-    // ★ バッファに溜めない。溜めると、相手が黙っている間ずっと画面に何も出ない。
-    //   端末に直接書く。
+    // Write directly so output remains visible while the CLI waits for input.
     const out = std.fs.File.stdout();
     const quiet_ms = 2000;
     var total: usize = 0;
     var reason: []const u8 = "上限に達した";
     while (true) {
-        // ★ read はブロッキング。claude はバナーを出したあと入力を待つので、
-        //   これが無いと永久に返ってこない。
+        // Poll before the blocking read to bound periods without output.
         switch (pty.glauk_pty_poll(id, quiet_ms)) {
             0 => {
                 reason = "出力が止まった";

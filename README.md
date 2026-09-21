@@ -50,7 +50,12 @@ cd core && zig build              # core first
 open macos/Glauk/Glauk.xcodeproj
 ```
 
-Needs Zig 0.15.2 and Xcode. Tests: `cd core && zig test src/root.zig`.
+Needs Zig 0.15.2 and Xcode.
+
+Run the core tests with `cd core && zig build test`. From the repository root,
+run `sh macos/Tests/run.sh` for Swift regression checks covering note search,
+tree structure, document lifecycle, and external edits. The Swift checks build
+the core first and require Xcode Command Line Tools.
 
 ## Getting started
 

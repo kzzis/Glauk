@@ -1,8 +1,5 @@
-// NSRange+Range.swift
 import Foundation
 
-// ★ 構文ハイライトだけでなく、にじみやカーソル保全からも使う。
-//   SyntaxHighlighter.swift の末尾に置いたままだと依存が見えないので分けた。
 extension NSRange {
     func union(_ other: NSRange) -> NSRange {
         let start = Swift.min(location, other.location)

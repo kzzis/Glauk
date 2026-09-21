@@ -1,4 +1,3 @@
-// ContentView.swift
 import SwiftUI
 import AppKit
 
@@ -6,21 +5,16 @@ struct ContentView: View {
     @EnvironmentObject var noteIndex: NoteIndex
     @EnvironmentObject var notesFolder: NotesFolder
     @StateObject private var document = DocumentStore()
-    /// ノート間の移動は全部ここを通す。ContentView は入口を並べるだけにする。
     @StateObject private var navigator: NoteNavigator
     @State private var showSwitcher = false
-    /// 外部からの書き換えを見張る。AIエージェントや Obsidian の編集に気づくため。
     @StateObject private var watcher = FileWatcher()
-    /// ★ 開くまで作らない。常に生成すると SwiftTerm の初期化コストが
-    ///   ⌥Space の出現時間(p95 < 300ms)に乗ってしまう。
+    /// ウィンドウ表示を遅らせないよう、SwiftTerm はペインを開くまで生成しない。
     @State private var agent: AgentPaneController?
     @State private var showAgent = false
-    /// ★ @AppStorage は Int32 を扱えないので Int で持つ
+    /// @AppStorage は Int32 を扱えないので Int で持つ
     @AppStorage("glauk.defaultAgent") private var defaultAgent = Int(AgentKind.claude.rawValue)
-    /// 紙 / 夜 / システム追従
     @AppStorage(ThemePreference.storageKey) private var theme = ThemePreference.auto.rawValue
     @AppStorage(GlaukTheme.storageKey) private var palette = GlaukTheme.paper.rawValue
-    /// 名前を尋ねるダイアログ(新規ノート / 新規フォルダ / 名前を変更)
     @State private var namePrompt: NamePrompt?
     @State private var nameInput = ""
 
@@ -39,7 +33,6 @@ struct ContentView: View {
             }
         }
     }
-    /// ツリーの開閉は覚えておく。畳めば仕様書どおりの単一画面に戻る。
     @AppStorage("glauk.showTree") private var showTree = true
 
     init(noteIndex: NoteIndex, notesFolder: NotesFolder) {
@@ -87,8 +80,7 @@ struct ContentView: View {
         }
         .frame(minWidth: 900, minHeight: 700)
         .preferredColorScheme(ThemePreference(rawValue: theme)?.colorScheme)
-        // ★ SwiftUI の外にある NSWindow にも伝える。ここを忘れると
-        //   タイトルバーだけ元のテーマのまま残る。
+        // タイトルバーの外観を揃えるため、NSWindow にも反映する。
         .onChange(of: theme) { _, newValue in
             ThemePreference.apply(ThemePreference(rawValue: newValue) ?? .auto,
                                   to: NSApp.keyWindow)
@@ -104,8 +96,6 @@ struct ContentView: View {
                 )
             }
         }
-        // ★ どこに作るかを必ず見せる。任意のフォルダを扱う以上、
-        //   「気づいたら変な場所にファイルができていた」を防ぐ。
         .alert(item: $navigator.pendingCreate) { pending in
             Alert(
                 title: Text("「\(pending.name)」を作成しますか?"),
@@ -145,26 +135,22 @@ struct ContentView: View {
         }
         .onAppear {
             watcher.onExternalChange = { _ in
-                // ★ にじみとカーソル保全は MarkdownTextView 側で起きる。
+                // にじみとカーソル保全は MarkdownTextView 側で起きる。
                 //   ここは読み直すだけ。document.lastExternalEdit が合図になる。
                 guard let result = document.reloadFromDisk() else { return }
                 #if DEBUG
                 print("[watch] 読み直した / 変わった行 \(result.changedLines)")
                 #endif
             }
-            // ★ .onChange は最初の値では発火しない。起動時に既に開いていた
+            // .onChange は最初の値では発火しない。起動時に既に開いていた
             //   ファイルを見張り始めるために、ここでも1度呼ぶ。
             watcher.watch(path: document.path)
         }
-        // 開いているノートが変わったら見張る先も変える
         .onChange(of: document.path) { _, newPath in
             watcher.watch(path: newPath)
-            // AIペインにも今どれを見ているかを伝える
             agent?.followActiveFile(activeFileForAgent)
         }
-        // 起動時
         .task { await noteIndex.refresh(root: notesFolder.root) }
-        // 設定を変えたとき
         .onChange(of: notesFolder.root) { _, newRoot in
             Task { await noteIndex.refresh(root: newRoot) }
         }
@@ -178,13 +164,13 @@ struct ContentView: View {
     private var toolbar: some View {
         HStack(spacing: 2) {
             iconButton(showTree ? "sidebar.left" : "sidebar.leading",
-                       // ★ ⌘\ はメニュー側(GlaukApp)が持つ。ここにも付けると
+                       // ⌘\ はメニュー側(GlaukApp)が持つ。ここにも付けると
                        //   同じキーの引き受け手が2つになる。
                        help: "ノートツリーを出し入れ (⌘\\)") { showTree.toggle() }
 
             Divider().frame(height: 14).padding(.horizontal, 4)
 
-            // ★ ⌘[ / ⌘] も EditorTextView 側で拾う。ここに .keyboardShortcut を
+            // ⌘[ / ⌘] も EditorTextView 側で拾う。ここに .keyboardShortcut を
             //   付けると、本文にフォーカスがあるとき二重に反応する。
             iconButton("chevron.left", help: "戻る (⌘[)", enabled: navigator.canGoBack) {
                 Task { await navigator.goBack() }
@@ -195,7 +181,7 @@ struct ContentView: View {
 
             Divider().frame(height: 14).padding(.horizontal, 4)
 
-            // ★ フォルダ未設定でも押せるようにしておく。disabled にすると
+            // フォルダ未設定でも押せるようにしておく。disabled にすると
             //   無反応になり、「vault を指定する場所が無い」ように見える。
             //   未設定のときはスイッチャー側が「フォルダを選ぶ…」を出す。
             iconButton("magnifyingglass", help: "ノートを探す (⌘O)") { showSwitcher = true }
@@ -204,12 +190,10 @@ struct ContentView: View {
 
             Divider().frame(height: 14).padding(.horizontal, 4)
 
-            // 開いている間は色を付けて、いま出ていることが分かるようにする
             iconButton("terminal",
                        help: showAgent ? "AIペインを隠す (⌘J)" : "AIペインを出す (⌘J)",
                        active: showAgent) { toggleAgent() }
 
-            // 仕様書の「UIクロームは無彩色」に従い、現在地はノート名だけ出す
             if let name = navigator.currentName {
                 Text(name)
                     .font(.system(size: 11))
@@ -227,8 +211,6 @@ struct ContentView: View {
                     .lineLimit(1)
             }
             vaultButton
-            // ★ 設定は ⌘, とアプリメニューからも開けるが、そこに気づけるとは
-            //   限らない。テーマの入口をここにも出しておく。
             SettingsLink {
                 Image(systemName: "gearshape")
                     .font(.system(size: 13, weight: .regular))
@@ -243,9 +225,7 @@ struct ContentView: View {
         .padding(.vertical, 6)
     }
 
-    /// ツールバーのアイコンボタン。
-    /// ★ .borderless にすると押せる範囲が絵の輪郭だけになるので、
-    ///   同じ大きさの枠を敷いて当たり判定を揃える。
+    /// .borderless の当たり判定を揃えるため、同じ大きさの枠を敷く。
     private func iconButton(_ symbol: String,
                             help: String,
                             enabled: Bool = true,
@@ -292,7 +272,7 @@ struct ContentView: View {
 
     private func toggleAgent() {
         if showAgent {
-            agent?.stop()          // ★ 仕様: 閉じたら必ず終了。常駐させない
+            agent?.stop()          // 仕様: 閉じたら必ず終了。常駐させない
             showAgent = false
             return
         }
@@ -302,15 +282,10 @@ struct ContentView: View {
         controller.start(agent: AgentKind(rawValue: Int32(defaultAgent)) ?? .claude,
                          cwd: workingDirectory,
                          activeFile: activeFileForAgent)
-        // 出した直後に打てるようにする
         DispatchQueue.main.async { controller.focusTerminal() }
     }
 
-    /// エージェントを走らせる場所。
-    /// ★ 仕様は「開いているファイルのディレクトリ」だが、vault が決まっているなら
-    ///   その根を使う。ペインを出したままノートを渡り歩くと、cwd はすぐ古くなる。
-    ///   会話を殺さずに追随させる方法が無いので、最初から vault 全体を見せておく。
-    /// ★ / や /tmp にすると、エージェントが変な場所を触りかねない。
+    /// ノートを移動しても同じ会話で参照できるよう、設定済みなら vault を cwd にする。
     private var workingDirectory: String {
         if let root = notesFolder.root, !root.isEmpty { return root }
         guard let path = document.path else { return NSHomeDirectory() }
@@ -408,7 +383,7 @@ struct ContentView: View {
                      thenOpen: Bool = false,
                      _ body: @escaping () throws -> String?) {
         Task {
-            // ★ 動かす前に書き出す。自動保存は800msデバウンスなので、打った直後に
+            // 動かす前に書き出す。自動保存は800msデバウンスなので、打った直後に
             //   名前を変えると、その数百ms分が元の場所に取り残される。
             if let source, isOpenDocument(under: source) {
                 await document.saveNow()
@@ -433,9 +408,7 @@ struct ContentView: View {
         return open == path || open.hasPrefix(path + "/")
     }
 
-    /// 開いているファイルが動いた/消えたときに DocumentStore を合わせる。
-    /// ★ path が古いままだと、次の自動保存が「元の場所」へ書き戻す。
-    ///   ゴミ箱に入れたはずのノートが復活することになる。
+    /// 自動保存が古いパスへ書き戻さないよう、文書の保存先を更新する。
     private func followOpenDocument(from source: String, to destination: String?) {
         guard let open = document.path, isOpenDocument(under: source) else { return }
         guard let destination else {

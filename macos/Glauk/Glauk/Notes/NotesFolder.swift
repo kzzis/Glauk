@@ -1,4 +1,3 @@
-// NotesFolder.swift
 import AppKit
 import Combine
 

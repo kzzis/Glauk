@@ -1,4 +1,3 @@
-// SettingsView.swift
 import SwiftUI
 import AppKit
 
@@ -27,7 +26,7 @@ struct SettingsView: View {
                 }
                 .pickerStyle(.segmented)
 
-                // ★ どのテーマも紙と朱の関係は保つ。見本を出して、名前だけで
+                // どのテーマも紙と朱の関係は保つ。見本を出して、名前だけで
                 //   選ばせないようにする。
                 swatches
             }
@@ -108,7 +107,7 @@ struct SettingsView: View {
         .padding(.vertical, 2)
     }
 
-    /// ★ ThemeToken は「今選ばれているテーマ」を返すので、見本には使えない。
+    /// ThemeToken は「今選ばれているテーマ」を返すので、見本には使えない。
     ///   見本は選ばれていないテーマの色も出す必要がある。
     private func color(_ theme: GlaukTheme, _ token: String, fallback: Color) -> Color {
         guard let ns = NSColor(named: theme.name(token)) else { return fallback }

@@ -1,10 +1,9 @@
-// GlaukTheme.swift
 import SwiftUI
 import AppKit
 
 /// 配色そのもの。ライト/ダークの切り替え(ThemePreference)とは別の軸。
 ///
-/// ★ 実体は Assets.xcassets の名前空間つき Color Set(例: `Paper/InkAccent`)。
+/// 実体は Assets.xcassets の名前空間つき Color Set(例: `Paper/InkAccent`)。
 ///   テーマごとに1組ずつ持たせておけば、どのテーマでもライト/ダークの
 ///   追随は Asset Catalog 側が面倒を見てくれる。
 enum GlaukTheme: String, CaseIterable, Identifiable {

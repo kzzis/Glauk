@@ -1,4 +1,3 @@
-// MarkdownLayoutManager.swift
 import AppKit
 
 final class MarkdownLayoutManager: NSLayoutManager {
@@ -35,7 +34,7 @@ final class MarkdownLayoutManager: NSLayoutManager {
             let glyphs = glyphRange(forCharacterRange: range, actualCharacterRange: nil)
             var union: NSRect?
             enumerateLineFragments(forGlyphRange: glyphs) { rect, _, _, fragGlyphs, _ in
-                // ★ 行頭に来た隠し文字(``` や > や `)は幅が0なので、直前の行の
+                // 行頭に来た隠し文字(``` や > や `)は幅が0なので、直前の行の
                 //   フラグメントに吸い込まれる。そのぶんまで囲むと、ブロックが
                 //   1行上まで伸びる。範囲の始まりより前から始まるフラグメントは数えない。
                 let chars = self.characterRange(forGlyphRange: fragGlyphs, actualGlyphRange: nil)
@@ -50,7 +49,7 @@ final class MarkdownLayoutManager: NSLayoutManager {
     }
 
     /// 文字にぴったり沿った矩形を返す。
-    /// ★ blockRects は行フラグメント(=行まるごと)を返すので、行内の一部を
+    /// blockRects は行フラグメント(=行まるごと)を返すので、行内の一部を
     ///   囲みたいものに使ってはいけない。タグの下地が行全体に広がる。
     private func inlineRects(for key: NSAttributedString.Key,
                              in charRange: NSRange,
@@ -61,11 +60,8 @@ final class MarkdownLayoutManager: NSLayoutManager {
         storage.enumerateAttribute(key, in: charRange) { value, range, _ in
             guard value != nil, range.length > 0 else { return }
 
-            // ★ 端の隠し文字を落としてから測る。
-            //   隠したグリフは幅が0なので、行頭の `` ` `` は「直前の行」の
-            //   フラグメントに入る(実測: 空行の "\n" と `` ` `` が同じ断片)。
-            //   その状態だと enumerateEnclosingRects が「2行にまたがる選択」とみなし、
-            //   前の空行が横幅いっぱいに塗られる。
+            // 幅ゼロの隠し文字が前の行のフラグメントに入るため、
+            // 前の空行まで塗らないよう両端の隠し文字を除いて測る。
             var trimmed = range
             while trimmed.length > 0,
                   storage.attribute(.glaukHidden, at: trimmed.location, effectiveRange: nil) != nil {
@@ -92,7 +88,7 @@ final class MarkdownLayoutManager: NSLayoutManager {
     }
 
     /// 行フラグメントの高さではなく、文字そのものの高さに合わせた矩形にする。
-    /// ★ lineHeightMultiple で増えた分は文字の「上」に付く。フラグメントの高さのまま
+    /// lineHeightMultiple で増えた分は文字の「上」に付く。フラグメントの高さのまま
     ///   下地を敷くと、1行ぶん上にずれて「上の行に帯が出ている」ように見える。
     private func hugText(_ rect: NSRect, charIndex: Int) -> NSRect {
         let glyph = glyphIndexForCharacter(at: charIndex)
@@ -108,7 +104,7 @@ final class MarkdownLayoutManager: NSLayoutManager {
     }
 
     /// 目印を付けた文字の「見た目の中心」を返す。
-    /// ★ 行フラグメントの中心では駄目。lineHeightMultiple で行が伸びているぶん
+    /// 行フラグメントの中心では駄目。lineHeightMultiple で行が伸びているぶん
     ///   文字より上にずれ、中黒やチェックボックスが宙に浮く。
     ///   ベースラインを基準にして、そこから文字の高さの分だけ持ち上げる。
     private func markerCenter(for range: NSRange,
@@ -162,7 +158,7 @@ final class MarkdownLayoutManager: NSLayoutManager {
         }
 
         // --- diff の + / - 行: コードブロックの中に薄い下地を敷く ---
-        // ★ コードブロックの角丸の「あと」に描く。先に描くと上から塗り潰される。
+        // コードブロックの角丸の「あと」に描く。先に描くと上から塗り潰される。
         for (range, rect) in blockRects(for: .glaukDiff, in: charRange, origin: origin) {
             guard let added = storage.attribute(.glaukDiff, at: range.location,
                                                 effectiveRange: nil) as? Bool else { continue }
@@ -212,16 +208,14 @@ final class MarkdownLayoutManager: NSLayoutManager {
             }
         }
 
-        // --- テーブルの縦罫線 ---
-        // ★ 桁揃えができた表は「列の目標位置」に引く。実際に置かれた `|` の位置で
-        //   引くと、計測と組版の差が残って行ごとに数ptずれる(実測3.5pt)。
+        // 計測と組版の幅の差を避けるため、罫線は列の目標位置に描く。
         var ruledTables: [NSRange] = []
         for (range, rect) in blockRects(for: .glaukTableColumns, in: charRange, origin: origin) {
             guard let xs = storage.attribute(.glaukTableColumns, at: range.location,
                                              effectiveRange: nil) as? [NSNumber] else { continue }
             ruledTables.append(range)
             tableRuleColor.setFill()
-            // ★ 端の `|` には引かない。外枠がすぐ左右にあるので、引くと
+            // 端の `|` には引かない。外枠がすぐ左右にあるので、引くと
             //   幅の無い空っぽの列が1本できたように見える。
             for x in xs.dropFirst().dropLast() {
                 NSRect(x: (origin.x + CGFloat(x.doubleValue)).rounded(),
@@ -279,7 +273,7 @@ final class MarkdownLayoutManager: NSLayoutManager {
             if done {
                 self.checkboxOnColor.setFill()
                 path.fill()
-                // ★ テキストの座標系は y が下向き。上向きの座標で組むと鉤が逆さになる。
+                // テキストの座標系は y が下向き。上向きの座標で組むと鉤が逆さになる。
                 let tick = NSBezierPath()
                 tick.move(to: NSPoint(x: box.minX + side * 0.24, y: box.midY))
                 tick.line(to: NSPoint(x: box.minX + side * 0.43, y: box.maxY - side * 0.26))
@@ -300,9 +294,7 @@ final class MarkdownLayoutManager: NSLayoutManager {
             guard value != nil else { return }
             let glyphs = glyphRange(forCharacterRange: range, actualCharacterRange: nil)
             enumerateLineFragments(forGlyphRange: glyphs) { rect, _, _, glyphRange, _ in
-                // ★ 隠した `> ` は幅が0なので、直前の空行のフラグメントに吸い込まれる。
-                //   実測: 空行の "\n" と "> " が同じフラグメントに入り、空行に縦棒が1本余分に出る。
-                //   引用の始まりより前から始まるフラグメントは描かない。
+                // 隠したマーカーが前の空行に入るため、引用範囲より前のフラグメントは描かない。
                 let chars = self.characterRange(forGlyphRange: glyphRange, actualGlyphRange: nil)
                 guard chars.location >= range.location else { return }
                 let bar = NSRect(x: origin.x + rect.minX + 4,
