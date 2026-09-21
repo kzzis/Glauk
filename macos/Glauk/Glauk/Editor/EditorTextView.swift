@@ -12,7 +12,7 @@ final class EditorTextView: NSTextView {
     /// 窓を広げると行がどこまでも伸びるのは、読み物としては読みにくい。
     ///   1行が長いほど、次の行の頭に目を戻すのが難しくなる。紙が広がっても
     ///   本文は真ん中の一段に留める。
-    var maxContentWidth: CGFloat = 720
+    var maxContentWidth: CGFloat = 680
     /// 本文が狭いときの最低限の余白
     var minSideInset: CGFloat = 32
 

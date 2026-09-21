@@ -26,15 +26,16 @@ struct NoteTreeView: View {
         VStack(spacing: 0) {
             if !noteIndex.hasFolder {
                 empty
-            } else if noteIndex.tree.isEmpty {
-                Text(noteIndex.isScanning ? "走査中…" : "ノートがありません")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 header
-                Divider()
-                list
+                if noteIndex.tree.isEmpty {
+                    Text(noteIndex.isScanning ? "走査中…" : "ノートがありません")
+                        .font(.system(size: 13))
+                        .foregroundStyle(ThemeToken.sidebarSecondary)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    list
+                }
             }
         }
         .onAppear { expanded = Set(expandedRaw.split(separator: "\n").map(String.init)) }
@@ -42,41 +43,33 @@ struct NoteTreeView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 6) {
-            Button {
-                expandAll()
-            } label: {
-                Image(systemName: "chevron.down.square")
-            }
-            .help("すべて開く")
-
-            Button {
-                setExpanded([])
-            } label: {
-                Image(systemName: "chevron.right.square")
-            }
-            .help("すべて畳む")
-
+        HStack(spacing: 8) {
+            Text("ノート")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(ThemeToken.sidebarSecondary)
             Spacer()
             Menu {
                 Button("新規ノート") { onAction(.newNote(inFolder: "")) }
                 Button("新規フォルダ") { onAction(.newFolder(inFolder: "")) }
+                Divider()
+                Button("すべて開く") { expandAll() }
+                Button("すべて畳む") { setExpanded([]) }
             } label: {
-                Image(systemName: "plus")
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 15, weight: .medium))
+                    .frame(width: 24, height: 26)
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
-            .frame(width: 22)
-            .help("vault の直下に作る")
-
+            .help("ノートの操作")
             Text("\(noteIndex.names.count)")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
+                .font(.system(size: 11))
+                .foregroundStyle(ThemeToken.sidebarSecondary)
                 .monospacedDigit()
         }
         .buttonStyle(.borderless)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
+        .padding(.horizontal, 20)
+        .frame(height: 32)
     }
 
     private var list: some View {
@@ -88,7 +81,7 @@ struct NoteTreeView: View {
                             .id(row.id)
                     }
                 }
-                .padding(.vertical, 4)
+                .padding(.vertical, 5)
             }
             .onChange(of: currentPath) { _, path in
                 guard let path else { return }
@@ -104,31 +97,34 @@ struct NoteTreeView: View {
     private func rowView(_ row: NoteTree.Row) -> some View {
         let node = row.node
         let isCurrent = node.id == currentPath
-        HStack(spacing: 4) {
+        HStack(spacing: 8) {
             if node.isFolder {
                 Image(systemName: "chevron.right")
                     .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(ThemeToken.sidebarSecondary)
                     .rotationEffect(.degrees(expanded.contains(node.id) ? 90 : 0))
-                    .frame(width: 10)
+                    .frame(width: 12)
             } else {
-                // ノートは三角のぶんだけ字下げして、フォルダと縦を揃える
-                Color.clear.frame(width: 10)
+                Color.clear.frame(width: 12)
             }
             Image(systemName: node.isFolder ? "folder" : "doc.text")
-                .font(.system(size: 11))
-                .foregroundStyle(isCurrent ? Color.primary : .secondary)
+                .font(.system(size: 13))
+                .foregroundStyle(isCurrent ? ThemeToken.ink : ThemeToken.sidebarSecondary)
+                .frame(width: 16)
             Text(node.name)
                 .lineLimit(1)
                 .truncationMode(.middle)
-                .foregroundStyle(Color.primary)
+                .foregroundStyle(ThemeToken.ink)
+                .font(.system(size: 13))
                 .fontWeight(isCurrent ? .semibold : .regular)
             Spacer(minLength: 0)
         }
-        .padding(.leading, CGFloat(row.depth) * 12 + 8)
+        .padding(.leading, CGFloat(row.depth) * 13 + 10)
         .padding(.trailing, 8)
-        .padding(.vertical, 3)
-        .background(isCurrent ? Color.primary.opacity(0.08) : .clear)
+        .frame(height: 32)
+        .background(isCurrent ? ThemeToken.accent.opacity(0.12) : .clear,
+                    in: RoundedRectangle(cornerRadius: 7))
+        .padding(.horizontal, 11)
         .contentShape(Rectangle())
         .onTapGesture {
             if node.isFolder {
@@ -155,14 +151,10 @@ struct NoteTreeView: View {
     }
 
     private var empty: some View {
-        VStack(spacing: 10) {
-            Text("ノートフォルダが未設定です")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-            Button("vault を選ぶ…") { notesFolder.chooseWithPanel() }
-                .controlSize(.small)
-        }
+        Text("上のボタンからノートフォルダを選択")
+            .font(.system(size: 12))
+            .foregroundStyle(ThemeToken.sidebarSecondary)
+            .multilineTextAlignment(.center)
         .padding(12)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
