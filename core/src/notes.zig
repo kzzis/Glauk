@@ -1,13 +1,10 @@
 //! ノートフォルダの走査。root 以下の `.md` を相対パスで集める。
-//! ネットワークには一切触らない。Obsidian の vault をそのまま指定できる。
 const std = @import("std");
 const ffi = @import("ffi.zig");
 
 /// シンボリックリンクのループなどで無限に潜らないための保険
 const MAX_DEPTH = 16;
 
-/// ノートが入っていないフォルダ。`.` 始まりを一律で弾くと
-/// `.obsidian` / `.git` / `.trash` がまとめて消える。
 fn isIgnoredDir(name: []const u8) bool {
     return std.mem.startsWith(u8, name, ".") or
         std.mem.eql(u8, name, "node_modules");
@@ -33,12 +30,9 @@ fn scanDir(
                 try out.append(allocator, '\n');
             },
             .directory => {
-                // ★ openDir の「前」に弾く。これが枝刈り。
-                //   .git に入らないので .git/objects の何万ものファイルを一度も見ない。
                 if (isIgnoredDir(entry.name)) continue;
 
-                // 権限が無いフォルダやリンク切れが1つあっただけで索引全体が
-                // 空になるのは困る。その1件だけ諦めて次へ進む。
+                // Skip inaccessible subdirectories without discarding the rest of the index.
                 var child = dir.openDir(entry.name, .{ .iterate = true }) catch continue;
                 defer child.close();
 
@@ -145,11 +139,9 @@ test "deeply nested notes are found, and MAX_DEPTH stops the descent" {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
 
-    // 3段は入る
     try tmp.dir.makePath("a/b/c");
     try tmp.dir.writeFile(.{ .sub_path = "a/b/c/deep.md", .data = "" });
 
-    // MAX_DEPTH を超えた先は見に行かない
     var path: std.ArrayList(u8) = .empty;
     defer path.deinit(testing.allocator);
     for (0..MAX_DEPTH + 2) |_| try path.appendSlice(testing.allocator, "d/");

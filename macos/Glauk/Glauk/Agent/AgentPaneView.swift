@@ -1,8 +1,7 @@
-// AgentPaneView.swift
 import SwiftUI
 import SwiftTerm
 
-/// ★ 既にあるインスタンスを返すだけ。SwiftUI が描き直しても
+/// 既にあるインスタンスを返すだけ。SwiftUI が描き直しても
 ///   同じターミナルが使い回され、対話の途中経過が消えない。
 struct AgentPaneView: NSViewRepresentable {
     let controller: AgentPaneController
@@ -13,14 +12,14 @@ struct AgentPaneView: NSViewRepresentable {
         return controller.terminalView
     }
 
-    /// ★ CGColor に落ちた色は外観の変化に追随しない。SwiftUI がテーマ変更で
+    /// CGColor に落ちた色は外観の変化に追随しない。SwiftUI がテーマ変更で
     ///   描き直すこのタイミングで入れ直す。
     func updateNSView(_ nsView: TerminalView, context: Context) {
         controller.applyTheme()
     }
 }
 
-/// ペインの中身。★ @ObservedObject で受けないと、errorMessage が変わっても
+/// ペインの中身。@ObservedObject で受けないと、errorMessage が変わっても
 ///   画面が描き直されない(@State に持っただけでは購読されない)。
 struct AgentPaneBody: View {
     @ObservedObject var controller: AgentPaneController
@@ -30,7 +29,7 @@ struct AgentPaneBody: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 6) {
-                // ★ エージェントに渡してあるファイルを常に見せる。入力欄を
+                // エージェントに渡してあるファイルを常に見せる。入力欄を
                 //   差し替えられない場面(既に打ち始めている)でも、どれを指して
                 //   いるつもりなのかがここで分かる。
                 Image(systemName: "doc.text")

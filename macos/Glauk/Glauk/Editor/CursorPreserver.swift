@@ -1,10 +1,6 @@
-// CursorPreserver.swift
 import AppKit
 
-/// 外から書き換えられたときに、カーソルを同じ文に留めておくための計算。
-///
-/// ★ ここが雑だと、エージェントが書くたびに視点が先頭へ飛ぶ。
-///   「AIが書いても書き手の集中を切らさない」という仕様の核心にあたる。
+/// 外部変更後のカーソル位置と文字範囲を計算する。
 enum CursorPreserver {
     /// 変更箇所がカーソルより前なら、増減した行数だけずらす。後ろなら動かさない。
     static func adjust(location: Int, in text: NSString,
@@ -14,8 +10,7 @@ enum CursorPreserver {
         return max(0, min(location + lineDelta, text.length))
     }
 
-    /// ★ 先頭から数えるので O(行数)。リロード時に1回だけ呼ぶこと。
-    ///   毎フレーム呼ぶと1万行のファイルで目に見えて重くなる。
+    /// 先頭から走査するため O(行数)。リロード時にだけ使う。
     static func lineStart(of lineIndex: Int, in text: NSString) -> Int {
         var index = 0
         var line = 0

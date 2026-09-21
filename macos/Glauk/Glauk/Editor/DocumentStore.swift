@@ -1,4 +1,3 @@
-// DocumentStore.swift
 import AppKit
 import Combine
 import UniformTypeIdentifiers
@@ -10,13 +9,9 @@ final class DocumentStore: ObservableObject {
     }
     @Published private(set) var path: String?
     @Published private(set) var lastError: String?
-    /// open() のたびに増える。MarkdownTextView はこれの変化を「差し替え」の合図として使う。
-    /// (テキストビューがfirstResponderのままだと通常のbinding経由の更新は無視されるため)
+    /// firstResponder 中は通常の binding 更新が無視されるため、本文の差し替えを通知する。
     @Published fileprivate(set) var revision = 0
-    /// 直近のリロードが「外からの書き換え」だったことの記録。
-    /// ★ revision は open() でも増える。エディタ側は「新しいファイルを開いた
-    ///   (カーソルは先頭)」と「同じファイルが外から変わった(カーソルは保つ)」を
-    ///   区別する必要があるので、外部変更のときだけこれを立てる。
+    /// 新規オープンと区別し、外部変更時だけカーソル位置を保つための情報。
     @Published private(set) var lastExternalEdit: ExternalEdit?
 
     struct ExternalEdit: Equatable {
@@ -39,9 +34,13 @@ final class DocumentStore: ObservableObject {
             lastError = "開けませんでした: \(newPath)"
             return
         }
+        replaceDocument(path: newPath, contents: contents)
+    }
+
+    private func replaceDocument(path newPath: String?, contents: String) {
         saveTask?.cancel()
-        suppressAutosave = true      // 読み込みで保存が走らないように
-        lastExternalEdit = nil       // 別のファイル。前のノートのにじみを持ち込まない
+        suppressAutosave = true
+        lastExternalEdit = nil
         path = newPath
         text = contents
         revision += 1
@@ -73,7 +72,7 @@ final class DocumentStore: ObservableObject {
 
     private func scheduleSave() {
         guard path != nil else { return }
-        saveTask?.cancel()                       // 前の予約を取り消す = デバウンス
+        saveTask?.cancel()
         saveTask = Task { [weak self] in
             try? await Task.sleep(for: self?.debounce ?? .milliseconds(800))
             guard !Task.isCancelled, let self else { return }
@@ -85,7 +84,7 @@ final class DocumentStore: ObservableObject {
         guard let path, !path.isEmpty else { return }
         let snapshot = text                      // メインスレッドで値をコピー
         let ok = await Task.detached(priority: .utility) {
-            GlaukFile.write(path: path, contents: snapshot)   // 別スレッドで書く
+            GlaukFile.write(path: path, contents: snapshot)
         }.value
         if !ok { lastError = "保存に失敗しました" }
     }
@@ -94,13 +93,7 @@ final class DocumentStore: ObservableObject {
 extension DocumentStore {
     /// 開いているファイルが消えたとき。中身は残さない。
     func close() {
-        saveTask?.cancel()
-        suppressAutosave = true
-        lastExternalEdit = nil
-        path = nil
-        text = ""
-        revision += 1
-        suppressAutosave = false
+        replaceDocument(path: nil, contents: "")
     }
 
     /// 中身はそのままに、書き戻し先だけ付け替える(名前の変更・移動のあと)。
@@ -127,11 +120,11 @@ extension DocumentStore {
         let lineDelta = fresh.components(separatedBy: "\n").count
             - old.components(separatedBy: "\n").count
 
-        // ★ リロードで自動保存が走ると、外部の変更を自分が上書きしてしまう
+        // リロードで自動保存が走ると、外部の変更を自分が上書きしてしまう
         suppressAutosave = true
         text = fresh
         revision += 1
-        // ★ revision を増やした後に立てる。エディタは revision の一致で
+        // revision を増やした後に立てる。エディタは revision の一致で
         //   「この差し替えは外部変更だった」と判断する。
         lastExternalEdit = ExternalEdit(revision: revision,
                                         changedLines: changed,
@@ -141,9 +134,7 @@ extension DocumentStore {
         return ReloadResult(oldText: old, newText: fresh, changedLines: changed)
     }
 
-    /// 前後から一致する行を削っていき、残った範囲を「変わった行」とみなす。
-    /// ★ 間に挟まれた無変更行も変更扱いになる。Stage 1 は「どの行が変わったか」
-    ///   だけを見るので、ここは割り切る。
+    /// 前後の一致行を除いた範囲を返す。間にある無変更行も範囲に含む。
     static func changedLineRange(old: String, new: String) -> Range<Int> {
         let oldLines = old.components(separatedBy: "\n")
         let newLines = new.components(separatedBy: "\n")

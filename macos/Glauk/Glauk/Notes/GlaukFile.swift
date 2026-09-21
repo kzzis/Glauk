@@ -1,4 +1,3 @@
-// GlaukFile.swift
 import Foundation
 import GlaukCore
 

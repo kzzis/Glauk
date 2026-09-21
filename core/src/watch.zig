@@ -1,9 +1,6 @@
 //! 外部からのファイル変更を kqueue で検知する。
 //!
-//! ★ 素朴に「開いた fd を監視して NOTE_WRITE を待つ」だけでは動かない。
-//!   多くのツール(Glauk自身を含む)は一時ファイルに書いて rename するので、
-//!   パスが指す inode が差し替わり、監視していた側には WRITE が二度と来ない。
-//!   RENAME/DELETE を受けて開き直す必要がある。
+//! Atomic saves replace the inode; reopen on RENAME/DELETE to keep watching the path.
 const std = @import("std");
 const posix = std.posix;
 
@@ -33,8 +30,7 @@ fn openAndRegister(kq: posix.fd_t, path: []const u8) !posix.fd_t {
     var changes = [_]posix.Kevent{.{
         .ident = @intCast(file.handle),
         .filter = std.c.EVFILT.VNODE,
-        // ★ EV_CLEAR を付けないと「状態」として通知され続け、同じイベントを
-        //   何度も受け取る。一度読んだらクリアする(エッジトリガ)。
+        // Clear delivered events so unchanged state does not notify repeatedly.
         .flags = std.c.EV.ADD | std.c.EV.CLEAR,
         // NOTE_WRITE だけでは足りない。atomic save は RENAME/DELETE で来る。
         .fflags = std.c.NOTE.WRITE | std.c.NOTE.EXTEND |
@@ -73,8 +69,7 @@ pub export fn glauk_watch_next_external_change(path: [*:0]const u8) callconv(.c)
             fd = openAndRegister(kq, p) catch return false;
         }
 
-        // ★ 判定は再登録の「後」。自分の保存でも inode は差し替わるので、
-        //   登録し直しは必ずやる。逆にすると自分が保存した後に監視が外れる。
+        // Re-register before suppressing self-writes: our saves also replace the inode.
         if (!isSelfWrite()) return true;
         // 自分の書き込みなら、通知せずに待ち直す
     }
@@ -116,7 +111,7 @@ test "kqueue が外部からの追記を拾う" {
     try tmp.dir.writeFile(.{ .sub_path = "note.md", .data = "v2 changed" });
 
     var events: [1]posix.Kevent = undefined;
-    // ★ タイムアウトを必ず入れる。null だと壊れたときにテストが永久に固まる。
+    // Bound the wait so missing events cannot hang the test.
     var timeout = posix.timespec{ .sec = 2, .nsec = 0 };
     const n = try posix.kevent(kq, &.{}, &events, &timeout);
 
@@ -154,8 +149,7 @@ test "rename すると監視していた inode には WRITE が来ない" {
     const n = try posix.kevent(kq, &.{}, &events, &timeout);
 
     try testing.expectEqual(@as(usize, 1), n);
-    // ★ ここが肝。届くのは WRITE ではなく DELETE(または RENAME)。
-    //   WRITE だけを見ていると、この保存に永久に気づけない。
+    // Atomic replacement reports DELETE or RENAME, not WRITE.
     const replaced = (events[0].fflags & (std.c.NOTE.RENAME | std.c.NOTE.DELETE)) != 0;
     try testing.expect(replaced);
     try testing.expect((events[0].fflags & std.c.NOTE.WRITE) == 0);

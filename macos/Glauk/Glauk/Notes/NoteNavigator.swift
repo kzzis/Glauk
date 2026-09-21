@@ -1,4 +1,3 @@
-// NoteNavigator.swift
 import AppKit
 import Combine
 
@@ -55,7 +54,7 @@ final class NoteNavigator: ObservableObject {
     /// ツリーやクイックスイッチャーからも通る、唯一の「開く」経路
     func open(at absolutePath: String) async {
         guard absolutePath != store.path else { return }
-        // ★ 自動保存は800msデバウンス。打った直後に移動すると未保存のことがある。
+        // 自動保存は800msデバウンス。打った直後に移動すると未保存のことがある。
         //   「移動したら直前の編集が消えた」を起こさないよう、順序をここで固定する。
         await store.saveNow()
         if let current = store.path, history.last != current { history.append(current) }
@@ -95,7 +94,7 @@ final class NoteNavigator: ObservableObject {
             pendingCreate = nil
             return
         }
-        // ★ 次の走査を待たずに索引へ足す。待つと、作った直後にもかかわらず
+        // 次の走査を待たずに索引へ足す。待つと、作った直後にもかかわらず
         //   元のノートのリンクが「未作成」の見た目のままになる。
         index.note(name: name, wasCreatedAt: relative)
         await open(at: absolute)
@@ -119,7 +118,7 @@ final class NoteNavigator: ObservableObject {
 extension Notification.Name {
     static let glaukGoBack = Notification.Name("glauk.goBack")
     static let glaukGoForward = Notification.Name("glauk.goForward")
-    // ★ WindowGroup を外したのでメニューが唯一の確実な経路になった。
+    // WindowGroup を外したのでメニューが唯一の確実な経路になった。
     //   ボタンの .keyboardShortcut は本文にフォーカスがあると届かないことがある。
     static let glaukFindNote = Notification.Name("glauk.findNote")
     static let glaukOpenFile = Notification.Name("glauk.openFile")

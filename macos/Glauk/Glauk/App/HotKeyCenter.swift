@@ -1,19 +1,10 @@
-// HotKeyCenter.swift
 import AppKit
 import Carbon.HIToolbox
 
 /// C のコールバックは値を持ち回れないので、ここに置いて拾わせる。
 private nonisolated(unsafe) var hotKeyTrigger: (() -> Void)?
 
-/// アプリが非アクティブでもキーを拾う。
-///
-/// ★ この用途で使える方法は限られる:
-///   - NSEvent.addGlobalMonitorForEvents … キーを消費できず、他アプリにも届く
-///   - CGEventTap … アクセシビリティ権限が要る。要求が重い
-///   - Carbon の RegisterEventHotKey … 権限不要でキーを消費できる ← これ
-///   古いAPIだが代替が無く、Alfred や Raycast も同じ方式。
-///
-/// soffes/HotKey という薄いラッパーもあるが、この程度のために依存を増やさず直接叩く。
+/// RegisterEventHotKey はアクセシビリティ権限なしでグローバルキーを消費できる。
 @MainActor
 final class HotKeyCenter {
     private var ref: EventHotKeyRef?
@@ -44,8 +35,7 @@ final class HotKeyCenter {
         guard installed == noErr else { return false }
 
         let id = EventHotKeyID(signature: Self.signature, id: 1)
-        // ★ ref をプロパティに持ち続ける。ローカル変数にすると関数を抜けた時点で
-        //   登録が解除され、「登録したのに反応しない」になる。
+        // 登録解除時に使う参照を保持する。
         let status = RegisterEventHotKey(keyCode, modifiers, id,
                                          GetApplicationEventTarget(), 0, &ref)
         if status != noErr {

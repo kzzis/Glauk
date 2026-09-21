@@ -1,4 +1,3 @@
-// NoteIndex.swift
 import Combine
 import Foundation
 
@@ -6,12 +5,10 @@ import Foundation
 final class NoteIndex: ObservableObject {
     @Published private(set) var names: [String] = []
     @Published private(set) var isScanning = false
-    /// ノートフォルダが設定されているか
     @Published private(set) var hasFolder = false
     /// 索引の中身が変わるたびに増える。エディタは「リンクの色を塗り直す合図」に使う。
     @Published private(set) var revision = 0
-    /// サイドバー用のツリー。★ 同名で潰れる前の「全パス」から組む。
-    ///   names は同名を1つに寄せてあるので、そのまま使うとノートが消える。
+    /// 同名ノートを失わないよう、重複排除前の全パスから組む。
     @Published private(set) var tree: [NoteNode] = []
     private var pathByName: [String: String] = [:]
     private var allPaths: [String] = []
@@ -60,9 +57,7 @@ final class NoteIndex: ObservableObject {
 
     func exists(_ name: String) -> Bool { pathByName[name] != nil }
 
-    /// 未作成ノートの区別表示に使う。
-    /// ★ フォルダ未設定のときは判定材料が無い。ここで false を返すと本文中の
-    ///   `[[リンク]]` が全部グレーの点線になってしまうので、「ある」ものとして扱う。
+    /// フォルダ未設定では判定できないため、リンクを未作成扱いにしない。
     func looksResolvable(_ name: String) -> Bool { !hasFolder || exists(name) }
 
     /// ノートフォルダからの相対パス
@@ -73,7 +68,7 @@ final class NoteIndex: ObservableObject {
         return root + "/" + rel
     }
 
-    /// Step 5b の新規作成で、走査を待たずに索引へ足す
+    /// 作成直後のリンク表示を更新するため、走査を待たずに索引へ足す。
     func note(name: String, wasCreatedAt relativePath: String) {
         guard pathByName[name] != relativePath else { return }
         pathByName[name] = relativePath
@@ -81,11 +76,17 @@ final class NoteIndex: ObservableObject {
         revision += 1
     }
 
-    /// クイックスイッチャー用。★ 件数を絞らない。
-    /// `candidates` は補完ポップアップ用に上限があるので、そのまま使うと
-    /// 「全部出てこない」ことになる。並びは
-    /// 名前の前方一致 → 名前の部分一致 → パスの部分一致 の順。
+    /// 件数制限なし。名前の前方一致、名前の部分一致、パスの部分一致の順。
     func searchResults(matching query: String) -> [String] {
+        rankedMatches(matching: query, includePaths: true)
+    }
+
+    /// 補完は名前だけを検索し、表示件数を制限する。
+    func candidates(matching query: String, limit: Int = 20) -> [String] {
+        Array(rankedMatches(matching: query, includePaths: false).prefix(limit))
+    }
+
+    private func rankedMatches(matching query: String, includePaths: Bool) -> [String] {
         guard !query.isEmpty else { return names }
         let lower = query.lowercased()
         var namePrefix: [String] = []
@@ -97,23 +98,11 @@ final class NoteIndex: ObservableObject {
                 namePrefix.append(name)
             } else if lowered.contains(lower) {
                 nameContains.append(name)
-            } else if pathByName[name]?.lowercased().contains(lower) == true {
-                // フォルダ名でも辿れるようにする(例: "Laravel" で資料フォルダ配下が出る)
+            } else if includePaths, pathByName[name]?.lowercased().contains(lower) == true {
                 pathContains.append(name)
             }
         }
         return namePrefix + nameContains + pathContains
-    }
-
-    /// `[[` 補完のポップアップ用。前方一致を先に、部分一致を後に
-    func candidates(matching query: String, limit: Int = 20) -> [String] {
-        guard !query.isEmpty else { return Array(names.prefix(limit)) }
-        let lower = query.lowercased()
-        let prefix = names.filter { $0.lowercased().hasPrefix(lower) }
-        let contains = names.filter {
-            !$0.lowercased().hasPrefix(lower) && $0.lowercased().contains(lower)
-        }
-        return Array((prefix + contains).prefix(limit))
     }
 
     private func depth(of path: String) -> Int {

@@ -1,9 +1,6 @@
 //! PTY(擬似端末)の上でエージェントCLIを起動する。
 //!
-//! ★ なぜ普通のパイプでなく PTY なのか:
-//!   claude や codex は「人間が端末で使っている」前提で動く。パイプだと
-//!   色が消え、対話UIを諦め、ものによっては「TTYが必要」で終了する。
-//!   PTY を使うと「端末だと思わせる」ことができる。
+//! PTY preserves the agent CLIs’ interactive terminal UI.
 const std = @import("std");
 const c = @cImport({
     @cInclude("util.h"); // forkpty
@@ -31,20 +28,15 @@ pub const Agent = enum(c_int) {
     codex = 1,
 };
 
-/// エージェントCLIを新しいPTY上で起動する。セッションIDを返す。失敗なら -1。
-/// ★ 大きさは起動時に渡す。あとから resize する形にすると、CLI は最初の
-///   1画面を 80桁で描いてしまい、折り返しが崩れたまま残る。
+/// Return a session ID, or -1 on failure. Set the size before the CLI draws its first frame.
 pub export fn glauk_pty_spawn(agent: c_int, cwd: [*:0]const u8, rows: u16, cols: u16) callconv(.c) i32 {
-    // ★ 先に検査する。@enumFromInt に知らない値を渡すと安全モードで落ちる。
-    //   Swift 側の書き間違いがアプリごと落とす事故になりうる。
+    // Validate foreign input before @enumFromInt, which traps on unknown values.
     if (agent != @intFromEnum(Agent.claude) and agent != @intFromEnum(Agent.codex)) {
         std.debug.print("[glauk] 知らないエージェント番号です: {d}\n", .{agent});
         return -1;
     }
 
-    // ★ fork の前に、ユーザーの PATH を1度だけ調べておく。
-    //   GUI アプリが受け取る PATH は /usr/bin:/bin:/usr/sbin:/sbin だけで、
-    //   Homebrew も ~/.local/bin も入っていない。素の execvp は必ず失敗する。
+    // Resolve the shell PATH before forking; the GUI PATH may omit installed CLIs.
     const path_z = resolvedUserPath();
 
     var master: c_int = -1;
@@ -55,26 +47,18 @@ pub export fn glauk_pty_spawn(agent: c_int, cwd: [*:0]const u8, rows: u16, cols:
         .ws_ypixel = 0,
     };
 
-    // ★ ここでプロセスが2つになる。両方が同じ場所から再開し、戻り値だけが違う。
-    //   親 = 子のPID(正) / 子 = 0
     const pid = c.forkpty(&master, null, null, &ws);
     if (pid < 0) {
-        // サンドボックス下では PTY を確保できずここに来る(errno=EPERM)。
         std.debug.print("[glauk] forkpty に失敗しました: errno={d}\n", .{std.c._errno().*});
         return -1;
     }
 
     if (pid == 0) {
-        // ---- ここから子プロセス ----
         if (c.chdir(cwd) != 0) c._exit(126); // 移動できない
 
-        // ★ 調べておいた PATH を child に渡してから直接起動する。
-        //   PTY の中で対話シェルを走らせると、ジョブ制御が使えず
-        //   「can't set tty pgrp」を出すうえ、.zshrc の出力も混ざる。
+        // Launch directly to avoid shell job-control errors and startup output.
         _ = c.setenv("PATH", path_z, 1);
-        // ★ GUI アプリの環境には TERM が無い(あっても "dumb")。
-        //   codex は「TERM が dumb なら対話UIを出さない」と明示的に拒否する。
-        //   ここは本物の PTY なので、色と機能を持つ端末名を名乗る。
+        // GUI environments may have no TERM or use dumb, disabling the CLI UI.
         _ = c.setenv("TERM", "xterm-256color", 1);
         _ = c.setenv("COLORTERM", "truecolor", 1);
         // 文字化けを避ける。既にあれば尊重する(第3引数 0 = 上書きしない)。
@@ -86,15 +70,11 @@ pub export fn glauk_pty_spawn(agent: c_int, cwd: [*:0]const u8, rows: u16, cols:
             .codex => "codex",
         };
         const argv = [_:null]?[*:0]const u8{ name, null };
-        _ = c.execvp(name, @constCast(@ptrCast(&argv)));
-        // ★ execvp は成功したら戻ってこない(中身が入れ替わる)。
-        //   ここに来たのは失敗したときだけ。127 は「コマンドが無い」の慣習。
-        //   exit ではなく _exit。exit だと親から引き継いだバッファを流して
-        //   親の出力が二重に出る。
+        _ = c.execvp(name, @ptrCast(@constCast(&argv)));
+        // _exit avoids flushing inherited parent buffers after exec fails.
         c._exit(127);
     }
 
-    // ---- ここから親プロセス ----
     sessions_lock.lock();
     defer sessions_lock.unlock();
 
@@ -112,10 +92,7 @@ var user_path_buf: [4096]u8 = undefined;
 var user_path_ready = false;
 var user_path_lock: std.Thread.Mutex = .{};
 
-/// ★ ログインかつ対話のシェルに聞く。zsh は .zshrc を「対話シェルのとき」しか
-///   読まず、~/.local/bin はそこで足されていることが多い。
-///   実測(GUIと同じ最小PATHで): -l -c だと /opt/homebrew/bin しか見えず、
-///   -l -i -c で ~/.local/bin まで入る。
+/// Use an interactive login shell to include PATH additions from .zshrc.
 fn resolvedUserPath() [*:0]const u8 {
     user_path_lock.lock();
     defer user_path_lock.unlock();
@@ -153,7 +130,6 @@ fn resolvedUserPath() [*:0]const u8 {
 
 fn lookup(id: i32) ?Session {
     sessions_lock.lock();
-    // ★ defer が肝。早期 return を1つ足しただけでデッドロックしないように。
     defer sessions_lock.unlock();
     return sessions.get(id);
 }
@@ -189,8 +165,7 @@ pub export fn glauk_pty_resize(id: i32, rows: u16, cols: u16) callconv(.c) bool 
 pub export fn glauk_pty_kill(id: i32) callconv(.c) void {
     sessions_lock.lock();
     const maybe = sessions.fetchRemove(id);
-    // ★ 表から取り出したら即座に解放する。この下の waitpid は子の終了を待つので
-    //   ブロックしうる。ロックを持ったままブロックすると他のスレッドが全部止まる。
+    // Release the lock before waitpid so other sessions can continue.
     sessions_lock.unlock();
 
     const s = (maybe orelse return).value;
@@ -199,9 +174,7 @@ pub export fn glauk_pty_kill(id: i32) callconv(.c) void {
     _ = std.posix.waitpid(s.pid, 0); // ゾンビ(<defunct>)を残さない
 }
 
-/// 読めるデータが来るまで待つ。1=読める / 0=時間切れ / -1=エラー。
-/// ★ read はブロッキングなので、これが無いと「相手が黙ったまま」のときに
-///   永久に待つ。demo を有限時間で終わらせるために要る。
+/// Wait for data: 1 = ready, 0 = timeout, -1 = error.
 pub export fn glauk_pty_poll(id: i32, timeout_ms: i32) callconv(.c) i32 {
     const s = lookup(id) orelse return -1;
     var fds = [_]c.struct_pollfd{.{ .fd = s.master, .events = c.POLLIN, .revents = 0 }};
@@ -235,7 +208,6 @@ test "知らないIDをkillしても落ちない" {
 }
 
 test "知らないエージェント番号はspawnせず -1 を返す" {
-    // @enumFromInt に落ちる前に弾けているか
     try testing.expectEqual(@as(i32, -1), glauk_pty_spawn(42, "/tmp", 24, 80));
     try testing.expectEqual(@as(usize, 0), glauk_pty_session_count());
 }

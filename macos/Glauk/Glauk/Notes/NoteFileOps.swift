@@ -1,12 +1,6 @@
-// NoteFileOps.swift
 import AppKit
 
-/// ツリーから触るファイル操作。
-///
-/// ★ ここだけ Zig ではなく FileManager を使う。「削除」を macOS のゴミ箱へ送る
-///   `trashItem` に相当するものが Zig には無く、消す・戻すの意味づけまで含めて
-///   OS の作法に乗せたいので、この一群は Swift 側に置く。
-///   本文の読み書き(glauk_read_file / glauk_write_file)はこれまでどおり Zig。
+/// Finder から戻せるゴミ箱操作を使うため、ファイル操作は FileManager にまとめる。
 enum NoteFileOps {
     struct Failure: Error {
         let message: String
@@ -72,7 +66,7 @@ enum NoteFileOps {
         guard !FileManager.default.fileExists(atPath: destination) else {
             throw Failure(message: "移動先に同じ名前があります: \(leaf)")
         }
-        // ★ 自分の中へは移せない。folder/a を folder/a/b へ動かすとフォルダごと消える。
+        // 自分の中へは移せない。folder/a を folder/a/b へ動かすとフォルダごと消える。
         if isDirectory(path), (directory + "/").hasPrefix(path + "/") {
             throw Failure(message: "フォルダを自分の中へは移せません")
         }
@@ -85,7 +79,7 @@ enum NoteFileOps {
     }
 
     /// macOS のゴミ箱へ送る。Finder から元に戻せる。
-    /// ★ App Sandbox でも、ユーザーが選んだフォルダの中のファイルなら通る。
+    /// App Sandbox でも、ユーザーが選んだフォルダの中のファイルなら通る。
     ///   通らなかったときは理由まで見せる(アクセス権の問題であることが多い)。
     static func trash(_ path: String) throws {
         do {

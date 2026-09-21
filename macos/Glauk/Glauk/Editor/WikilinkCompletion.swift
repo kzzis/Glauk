@@ -1,4 +1,3 @@
-// WikilinkCompletion.swift
 import AppKit
 
 final class WikilinkCompletion {
@@ -14,10 +13,10 @@ final class WikilinkCompletion {
 
         guard let openIdx = line.range(of: "[[", options: .backwards) else { return nil }
         let afterOpen = line[openIdx.upperBound...]
-        if afterOpen.contains("]]") { return nil }      // 既に閉じている
+        if afterOpen.contains("]]") { return nil }
 
         let queryLength = afterOpen.utf16.count
-        // ★ NSRange は UTF-16 基準なので、utf16ビューで距離を測る
+        // NSRange は UTF-16 基準なので、utf16ビューで距離を測る
         let offset = line.utf16.distance(from: line.utf16.startIndex, to: openIdx.upperBound)
         return NSRange(location: head.location + offset, length: queryLength)
     }

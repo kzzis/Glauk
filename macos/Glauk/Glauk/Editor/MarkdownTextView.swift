@@ -1,16 +1,8 @@
-// MarkdownTextView.swift
 import SwiftUI
 import AppKit
 
 struct MarkdownTextView: NSViewRepresentable {
-    /// カーソルがある行に、記法をそのまま見せるかどうか。
-    ///
-    /// ★ false = 打った瞬間に変換する(Typora の打ち心地)。
-    ///   true にすると Obsidian と同じ「カーソル行だけソースが見える」に戻る。
-    ///   仕様書の初版は true 前提だったが、`- ` を打っても中黒にならないのは
-    ///   壊れているように感じる、という理由で false にした。
-    ///   代償として、`**` の内側にカーソルを置いてもどこからどこまでが装飾なのか
-    ///   見えなくなる。
+    /// true はカーソル行にソースを表示し、false は入力直後に装飾を適用する。
     static let showsSourceOnCursorLine = false
 
     /// 塗り直しに渡すカーソル行。即変換のときは「カーソル行は無い」ことにする。
@@ -21,7 +13,7 @@ struct MarkdownTextView: NSViewRepresentable {
     @Binding var text: String
     var noteIndex: NoteIndex
     /// ファイルを開くたびに増える値。これが変わったら、テキストビューが
-    /// firstResponder中でも強制的に中身を差し替える(Step 4のファイル読み込み用)。
+    /// firstResponder中でも強制的に中身を差し替える。
     var loadRevision = 0
     /// 索引が変わるたびに増える値。これが変わったら `[[リンク]]` の色だけ塗り直す
     /// (走査は非同期なので、初回表示のときは索引がまだ空のことがある)。
@@ -30,7 +22,7 @@ struct MarkdownTextView: NSViewRepresentable {
     /// カーソル保全とにじみは、これがあるときにだけ働く。
     var externalEdit: DocumentStore.ExternalEdit?
     /// 選ばれている配色。変わったら色を入れ直す。
-    /// ★ ライト⇔ダークは動的な色が勝手に追随するのでここは要らないが、
+    /// ライト⇔ダークは動的な色が勝手に追随するのでここは要らないが、
     ///   テーマの切り替えは参照する Color Set の名前ごと変わるので取り直しが要る。
     var themeID: String = GlaukTheme.paper.rawValue
     /// `[[リンク]]` がクリックされた。名前(`|`や`#`を落としたもの)が渡る。
@@ -41,9 +33,8 @@ struct MarkdownTextView: NSViewRepresentable {
         Coordinator(self)
     }
 
-    // 最初に1回だけ呼ばれる。ここでAppKit側を組み立てる
     /// レイアウトマネージャとテキストビューに色を入れる。
-    /// ★ makeNSView とテーマ切替の両方から呼ぶ。片方だけに書くと、
+    /// makeNSView とテーマ切替の両方から呼ぶ。片方だけに書くと、
     ///   切り替えたときに装飾だけ前のテーマの色で残る。
     private func applyTypography(_ typography: EditorTypography,
                                  to layoutManager: MarkdownLayoutManager,
@@ -106,10 +97,7 @@ struct MarkdownTextView: NSViewRepresentable {
         textView.autoresizingMask = NSView.AutoresizingMask.width
         // 横の余白は行長を 720pt に抑えるために EditorTextView が計算し直す
         textView.textContainerInset = NSSize(width: 32, height: 40)
-        // ★ これが無いと maxSize は生成時のフレーム高さのまま = 表示領域の高さで頭打ちになり、
-        //   本文がそれより長くてもテキストビューが伸びない(実測: 本文2545ptに対しフレーム660pt)。
-        //   さらに scrollCurrentLineToCenter の maxY が 0 になるため、
-        //   スクロールしても常に先頭へ戻され「全体が見れない」状態になる。
+        // 本文全体まで伸ばせるよう、生成時のフレームによる高さ制限を外す。
         textView.minSize = NSSize(width: 0, height: 0)
         textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude,
                                   height: CGFloat.greatestFiniteMagnitude)
@@ -117,10 +105,10 @@ struct MarkdownTextView: NSViewRepresentable {
         textView.font = typography.body
         applyTypography(typography, to: layoutManager, textView: textView)
 
-        // ★ EditorTypography.bodyParagraph と必ず同じものを使う。
+        // EditorTypography.bodyParagraph と必ず同じものを使う。
         //   別々に書くと、打っている最中と塗り直した後で行間が変わる。
         textView.defaultParagraphStyle = typography.bodyParagraph
-        // ★ typingAttributes に段落スタイルを固定しないこと。固定すると、
+        // typingAttributes に段落スタイルを固定しないこと。固定すると、
         //   見出し行に1文字打つたびにその段落が本文の段落スタイルで上書きされ、
         //   見出しの字間と上の余白が打っている最中だけ崩れる。
         //   指定しなければ、AppKit がカーソル位置の属性を引き継いでくれる。
@@ -128,7 +116,7 @@ struct MarkdownTextView: NSViewRepresentable {
 
         textView.string = text
         context.coordinator.textView = textView
-        context.coordinator.textStorage = storage   // ★ NSTextStorageの所有者がここしか無いので強参照で保持する
+        context.coordinator.textStorage = storage   // NSTextStorageの所有者がここしか無いので強参照で保持する
         context.coordinator.lastLoadRevision = loadRevision
         context.coordinator.lastIndexRevision = indexRevision
         context.coordinator.lastThemeID = themeID
@@ -136,7 +124,7 @@ struct MarkdownTextView: NSViewRepresentable {
 
         let scrollView = NSScrollView()
         scrollView.hasVerticalScroller = true
-        // ★ 紙の色はテキストビューが塗る。スクロールビューにも塗らせると、
+        // 紙の色はテキストビューが塗る。スクロールビューにも塗らせると、
         //   本文より下の余白だけ別の色になる。
         scrollView.drawsBackground = false
         scrollView.documentView = textView
@@ -146,15 +134,15 @@ struct MarkdownTextView: NSViewRepresentable {
     // SwiftUI側の状態が変わるたびに呼ばれる
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         guard let textView = scrollView.documentView as? NSTextView else { return }
-        // ★ 下の guard で早期 return する経路が多いので、必ず先に更新する。
+        // 下の guard で早期 return する経路が多いので、必ず先に更新する。
         //   ここを後ろに置くと、リンクをクリックしても古い(何もしない)閉包が呼ばれる。
         context.coordinator.onOpenNote = onOpenNote
-        // ★ 変換中(marked text)は絶対に触らない。
+        // 変換中(marked text)は絶対に触らない。
         //   下の `textView.string = text` はテキストビューを丸ごと置き換えるので、
         //   変換中に SwiftUI の再描画が挟まると未確定の文字列ごと消える。
         guard !textView.hasMarkedText() else { return }
 
-        // ★ Step 9: テーマが変わった。参照する Color Set の名前ごと変わるので、
+        // テーマが変わった。参照する Color Set の名前ごと変わるので、
         //   動的な色まかせにはできない。装飾の色を入れ直して本文も塗り直す。
         if context.coordinator.lastThemeID != themeID {
             context.coordinator.lastThemeID = themeID
@@ -172,7 +160,7 @@ struct MarkdownTextView: NSViewRepresentable {
             textView.needsDisplay = true
         }
 
-        // ★ Step 5a: 走査が終わって索引が入れ替わったら、本文はそのままで塗り直す。
+        // 走査が終わって索引が入れ替わったら、本文はそのままで塗り直す。
         //   これが無いと、起動直後に開いていた文書の `[[リンク]]` が
         //   「未作成」の見た目のまま(走査前の判定のまま)固まってしまう。
         if context.coordinator.lastIndexRevision != indexRevision {
@@ -185,14 +173,14 @@ struct MarkdownTextView: NSViewRepresentable {
             }
         }
 
-        // ★ Step 4: ファイルを開いた直後は loadRevision が変わる。これは
+        // ファイルを開いた直後は loadRevision が変わる。これは
         //   「テキストビューの中身を丸ごと差し替える」意図が明確な操作なので、
         //   firstResponder中でも(パネルを閉じてフォーカスが戻ってきていても)強制的に反映する。
         let isNewDocument = context.coordinator.lastLoadRevision != loadRevision
-        guard isNewDocument || textView.string != text else { return }   // ★ 無限ループ防止
+        guard isNewDocument || textView.string != text else { return }   // 無限ループ防止
 
         if !isNewDocument {
-            // ★ 編集中はテキストビューが正。
+            // 編集中はテキストビューが正。
             //   SwiftUI から届く `text` は、テキストビューが既に持っている内容より
             //   古いことがある(特に日本語変換は1文字ごとに何度も状態を更新するので、
             //   確定がその更新列の間に挟まる)。古い値をここで代入すると、
@@ -202,13 +190,13 @@ struct MarkdownTextView: NSViewRepresentable {
         }
         context.coordinator.lastLoadRevision = loadRevision
 
-        // ★ Step 8b: 同じ revision の外部変更だけを「にじませる対象」とみなす。
+        // 同じ revision の外部変更だけを「にじませる対象」とみなす。
         //   古い記録を使い回すと、無関係な差し替えでカーソルがずれる。
         let external = externalEdit?.revision == loadRevision ? externalEdit : nil
 
         let selected = textView.selectedRange()
         let scrollOffset = textView.enclosingScrollView?.contentView.bounds.origin ?? .zero
-        // ★ setSelectedRange はタイプライタースクロールを発火させる。
+        // setSelectedRange はタイプライタースクロールを発火させる。
         //   そのままだと、この後で戻すスクロール位置が打ち消される。
         context.coordinator.suppressTypewriterScroll = external != nil
 
@@ -245,7 +233,7 @@ struct MarkdownTextView: NSViewRepresentable {
             if isNewDocument { context.coordinator.nijimi.cancelAll(in: layoutManager) }
             return
         }
-        // ★ にじみは構文ハイライトの「後」。先に貼ると、ハイライトが触った
+        // にじみは構文ハイライトの「後」。先に貼ると、ハイライトが触った
         //   レイアウトの再計算で一時属性が消えることがある。
         let changedRange = CursorPreserver.characterRange(forLines: external.changedLines, in: ns)
         #if DEBUG
@@ -260,7 +248,7 @@ struct MarkdownTextView: NSViewRepresentable {
     final class Coordinator: NSObject, NSTextViewDelegate, NSTextStorageDelegate, EditorTextViewDelegate {
         private let parent: MarkdownTextView
         let highlighter = SyntaxHighlighter()
-        /// ★ NijimiHighlighter は @MainActor。Coordinator の生成は SwiftUI の
+        /// NijimiHighlighter は @MainActor。Coordinator の生成は SwiftUI の
         ///   makeCoordinator から来るので実際にはメインスレッドだが、型の上では
         ///   保証がない。最初に触るとき(必ずメインスレッド)まで遅らせる。
         lazy var nijimi: NijimiHighlighter = MainActor.assumeIsolated { NijimiHighlighter() }
@@ -356,7 +344,7 @@ struct MarkdownTextView: NSViewRepresentable {
             if ms > 8 { print("[latency] textDidChange \(String(format: "%.2f", ms))ms") }
             #endif
 
-            // ★ 変換中(下線が出ている状態)に complete(nil) を呼ぶと、変換候補ウィンドウと
+            // 変換中(下線が出ている状態)に complete(nil) を呼ぶと、変換候補ウィンドウと
             //   補完ポップアップがぶつかって入力が壊れる。日本語環境ではほぼ必須のガード。
             guard !textView.hasMarkedText() else { return }
             let ns = textView.string as NSString
@@ -387,7 +375,7 @@ struct MarkdownTextView: NSViewRepresentable {
         }
 
         // NSTextStorage が編集を確定させた直後に呼ばれる。
-        // ★ ここで属性を書き換えてはいけない。AppKit の編集サイクルの内側なので、
+        // ここで属性を書き換えてはいけない。AppKit の編集サイクルの内側なので、
         //   SwiftUI に載せた状態だと変換確定(日本語入力の1回目のEnter)の直後に
         //   その行のレイアウトが失われ、行が丸ごと描画されなくなる。
         //   編集範囲だけ覚えておいて、サイクルを抜けてから塗る。
@@ -427,7 +415,7 @@ struct MarkdownTextView: NSViewRepresentable {
 
             let ns = storage.string as NSString
             let selection = textView.selectedRange().clamped(to: ns.length)
-            // ★ 即変換のときは nil。これが「カーソル行だけソースを見せる」の唯一の分岐。
+            // 即変換のときは nil。これが「カーソル行だけソースを見せる」の唯一の分岐。
             let cursorLine = MarkdownTextView.activeLine(ns.lineRange(for: selection))
 
             if let edited = pendingEditedRange {
@@ -436,7 +424,7 @@ struct MarkdownTextView: NSViewRepresentable {
                                              editedRange: edited.clamped(to: ns.length),
                                              cursorLine: cursorLine)
             }
-            // ★ 即変換のときは、カーソルが動いても見た目は変わらない。
+            // 即変換のときは、カーソルが動いても見た目は変わらない。
             //   行の塗り直しは要らないので、打鍵ごとの仕事をそのぶん減らす。
             guard let cursorLine else { return }
             // カーソルが移った先と、離れた行の両方を塗り直す(ソース表示の切り替え)

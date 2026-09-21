@@ -1,8 +1,5 @@
-// NoteTreeView.swift
 import SwiftUI
 
-/// ツリーから頼まれた操作。実際に何をするかは ContentView が決める。
-/// ★ 確認ダイアログや索引の更新まで View に持たせると、行の描画と混ざって読めなくなる。
 enum NoteTreeAction {
     case open(String)                    // 相対パス
     case newNote(inFolder: String)       // 相対パス。ルートは ""
@@ -13,21 +10,15 @@ enum NoteTreeAction {
     case reveal(String)
 }
 
-/// 左のノートツリー。⌘\ で出し入れする。
-/// 仕様書の Zen モードを壊さないよう、既定では出るが畳めば元の単一画面に戻る。
 struct NoteTreeView: View {
     @EnvironmentObject var noteIndex: NoteIndex
     @EnvironmentObject var notesFolder: NotesFolder
 
     /// いま開いているノートの相対パス(強調表示と自動展開に使う)
     var currentPath: String?
-    /// 相対パスを添えて頼む
     var onAction: (NoteTreeAction) -> Void
 
-    /// ★ 開閉は自分で持つ。List(children:) 任せにすると、
-    ///   走査のたびにツリーが作り直されて開いていたフォルダが全部閉じる
-    ///   (フォアグラウンド復帰のたびに走査が走るので、実用上かなり困る)。
-    ///   改行区切りで覚えておけば再起動しても開いたまま。
+    /// 再走査でツリーが再構築されても開閉状態を保ち、再起動後にも復元する。
     @AppStorage("glauk.expandedFolders") private var expandedRaw = ""
     @State private var expanded: Set<String> = []
 
@@ -126,8 +117,6 @@ struct NoteTreeView: View {
             }
             Image(systemName: node.isFolder ? "folder" : "doc.text")
                 .font(.system(size: 11))
-                // ★ チロームは無彩色に保つ(仕様書「色はコンテンツと注釈だけが持つ」)。
-                //   「今ここ」は色ではなく明度と太さで示す。
                 .foregroundStyle(isCurrent ? Color.primary : .secondary)
             Text(node.name)
                 .lineLimit(1)
@@ -140,8 +129,6 @@ struct NoteTreeView: View {
         .padding(.trailing, 8)
         .padding(.vertical, 3)
         .background(isCurrent ? Color.primary.opacity(0.08) : .clear)
-        // ★ 行全体を当たり判定にする。フォルダは名前のどこを押しても開閉する
-        //   (三角だけしか反応しないのは狙いにくい)。
         .contentShape(Rectangle())
         .onTapGesture {
             if node.isFolder {
@@ -197,7 +184,6 @@ struct NoteTreeView: View {
         setExpanded(NoteTree.allFolders(noteIndex.tree))
     }
 
-    /// 開いたノートが深いところにあっても見えるように、親フォルダを開く
     private func reveal(_ path: String?) {
         guard let path else { return }
         var next = expanded

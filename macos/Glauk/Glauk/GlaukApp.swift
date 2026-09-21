@@ -1,11 +1,10 @@
-// GlaukApp.swift
 import SwiftUI
 import GlaukCore
 
 @main
 struct GlaukApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    /// ★ ContentView と同じキーを見る。UserDefaults 越しなので、
+    /// ContentView と同じキーを見る。UserDefaults 越しなので、
     ///   メニューから切り替えても本文側の @AppStorage がそのまま追従する。
     @AppStorage("glauk.showTree") private var showTree = true
     @AppStorage(ThemePreference.storageKey) private var theme = ThemePreference.auto.rawValue
@@ -19,7 +18,7 @@ struct GlaukApp: App {
     }
 
     var body: some Scene {
-        // ★ 本文のウィンドウは AppDelegate が持つので WindowGroup は置かない。
+        // 本文のウィンドウは AppDelegate が持つので WindowGroup は置かない。
         //   App プロトコルは Scene を最低1つ要求するので、Settings を置く。
         //   「⌘, で設定が開く」が副産物として付いてくる。
         Settings {
@@ -27,7 +26,7 @@ struct GlaukApp: App {
                 .environmentObject(appDelegate.noteIndex)
                 .environmentObject(appDelegate.notesFolder)
         }
-        // ★ ツリーの開閉はメニューに載せる。ボタンの .keyboardShortcut だけだと、
+        // ツリーの開閉はメニューに載せる。ボタンの .keyboardShortcut だけだと、
         //   本文の NSTextView が firstResponder のときに拾われないことがある
         //   (AppKit のビューが先にキーを食べる)。メニューなら必ず届く。
         .commands {

@@ -1,4 +1,3 @@
-// EditorTextView.swift
 import AppKit
 
 protocol EditorTextViewDelegate: AnyObject {
@@ -10,7 +9,7 @@ final class EditorTextView: NSTextView {
     weak var linkDelegate: EditorTextViewDelegate?
 
     /// 本文の行長の上限。
-    /// ★ 窓を広げると行がどこまでも伸びるのは、読み物としては読みにくい。
+    /// 窓を広げると行がどこまでも伸びるのは、読み物としては読みにくい。
     ///   1行が長いほど、次の行の頭に目を戻すのが難しくなる。紙が広がっても
     ///   本文は真ん中の一段に留める。
     var maxContentWidth: CGFloat = 720
@@ -24,14 +23,13 @@ final class EditorTextView: NSTextView {
 
     private func updateSideInset() {
         let side = max(minSideInset, (bounds.width - maxContentWidth) / 2)
-        // ★ inset を変えるとレイアウトが走り、setFrameSize が呼ばれうる。
+        // inset を変えるとレイアウトが走り、setFrameSize が呼ばれうる。
         //   変化が無いときは触らないことで往復を止める。
         guard abs(textContainerInset.width - side) > 0.5 else { return }
         textContainerInset = NSSize(width: side, height: textContainerInset.height)
     }
 
     #if DEBUG
-    /// 呼び出しからカーソルが出るまでを測る。仕様書の受け入れ基準 p95 < 300ms 用。
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
         SummonClock.firstDraw()
@@ -62,7 +60,7 @@ final class EditorTextView: NSTextView {
         super.mouseDown(with: event)      // ← リンク以外は通常動作
     }
 
-    /// ★ ⌘[ / ⌘] はここで拾う。ツールバーのボタンに .keyboardShortcut を
+    /// ⌘[ / ⌘] はここで拾う。ツールバーのボタンに .keyboardShortcut を
     ///   付けているだけだと、このテキストビューが firstResponder のときは
     ///   AppKit 側が先にキーを食べてしまい、届かないことがある。
     override func keyDown(with event: NSEvent) {

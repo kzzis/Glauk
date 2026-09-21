@@ -1,8 +1,5 @@
-// NoteSwitcher.swift
 import SwiftUI
 
-/// ⌘O で出すノート検索。ファイルツリーは作らない(Zenモード単一画面)代わりに、
-/// 「出したときだけ出て、Esc で消える」入り口を用意する。
 struct NoteSwitcherView: View {
     @EnvironmentObject var noteIndex: NoteIndex
     @EnvironmentObject var notesFolder: NotesFolder
@@ -41,13 +38,12 @@ struct NoteSwitcherView: View {
                     .textFieldStyle(.plain)
                     .font(.title3)
                     .focused($focused)
-                    // ★ キー操作は TextField 自身に付ける。親に付けると、
+                    // キー操作は TextField 自身に付ける。親に付けると、
                     //   フォーカスを持っている TextField が先に食べてしまう。
                     .onKeyPress(.downArrow) { move(by: 1) }
                     .onKeyPress(.upArrow) { move(by: -1) }
                     .onKeyPress(.return) { openSelected() }
                     .onKeyPress(.escape) { onCancel(); return .handled }
-                // 全件出ていることが分かるように件数を添える
                 if noteIndex.hasFolder {
                     Text(count)
                         .font(.caption)
@@ -74,7 +70,7 @@ struct NoteSwitcherView: View {
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.separator))
         .shadow(radius: 24, y: 8)
-        // ★ 本文の NSTextView が firstResponder を持っている。同じ描画パスの中で
+        // 本文の NSTextView が firstResponder を持っている。同じ描画パスの中で
         //   奪おうとすると取り損ねることがあるので、1ターン待ってから focus する。
         .onAppear { DispatchQueue.main.async { focused = true } }
         .onChange(of: query) { _, _ in selection = 0 }
