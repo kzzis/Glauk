@@ -1,12 +1,15 @@
 <p align="center">
-  <img src="docs/icon.png" width="112" alt="">
+  <picture>
+    <source media="(prefers-color-scheme: light)" srcset="docs/icon-light.png">
+    <img src="docs/icon.png" width="112" alt="Glauk app icon">
+  </picture>
 </p>
 
 <h1 align="center">Glauk</h1>
 
-<p align="center">A Markdown editor for macOS, built for the thought you are having right now.</p>
+<p align="center">Write simply, effortlessly, beautifully.</p>
 
-![](docs/editor.png)
+![Glauk editor showing a Markdown note](docs/editor.png)
 
 ## Principles
 
