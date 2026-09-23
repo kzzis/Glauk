@@ -95,8 +95,7 @@ struct MarkdownTextView: NSViewRepresentable {
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = false
         textView.autoresizingMask = NSView.AutoresizingMask.width
-        // 横の余白は行長を 720pt に抑えるために EditorTextView が計算し直す
-        textView.textContainerInset = NSSize(width: 32, height: 40)
+        textView.textContainerInset = NSSize(width: 32, height: 64)
         // 本文全体まで伸ばせるよう、生成時のフレームによる高さ制限を外す。
         textView.minSize = NSSize(width: 0, height: 0)
         textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude,

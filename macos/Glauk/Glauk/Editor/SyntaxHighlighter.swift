@@ -53,6 +53,7 @@ final class SyntaxHighlighter {
         storage.removeAttribute(.glaukTable, range: scope)
         storage.removeAttribute(.glaukTableHeader, range: scope)
         storage.removeAttribute(.glaukLinkURL, range: scope)
+        storage.removeAttribute(.glaukLinkTarget, range: scope)
         storage.removeAttribute(.obliqueness, range: scope)
         storage.removeAttribute(.strikethroughStyle, range: scope)
         storage.removeAttribute(.kern, range: scope)   // テーブルの桁揃えをやり直すため
@@ -77,6 +78,7 @@ final class SyntaxHighlighter {
         var pendingBoldOpen: Span?
         var pendingItalicOpen: Span?
         var pendingStrikeOpen: Span?
+        var pendingLinkTextRange: NSRange?
         // wikilink_target は wikilink_name より必ず先に来る(開始位置ソート済みのため)。
         // 直前に見た target 名を覚えておけば、続く name の存在判定に使える。
         var currentTargetName: String?
@@ -295,10 +297,17 @@ final class SyntaxHighlighter {
 
             case .linkText:
                 storage.addAttribute(.foregroundColor, value: typography.accent, range: span.range)
+                storage.addAttribute(.underlineStyle,
+                                     value: NSUnderlineStyle.single.rawValue, range: span.range)
+                pendingLinkTextRange = span.range
 
             case .linkURL:
                 let url = (storage.string as NSString).substring(with: span.range)
                 storage.addAttribute(.glaukLinkURL, value: url, range: span.range)
+                if let textRange = pendingLinkTextRange {
+                    storage.addAttribute(.glaukLinkURL, value: url, range: textRange)
+                    pendingLinkTextRange = nil
+                }
 
             case .codeKeyword:
                 storage.addAttribute(.foregroundColor, value: typography.codeKeyword, range: span.range)
@@ -395,8 +404,14 @@ final class SyntaxHighlighter {
 
             case .wikilinkName:
                 let exists = currentTargetName.map(noteExists) ?? false
+                if let currentTargetName, !currentTargetName.isEmpty {
+                    storage.addAttribute(.glaukLinkTarget, value: currentTargetName,
+                                         range: span.range)
+                }
                 if exists {
                     storage.addAttribute(.foregroundColor, value: typography.accent, range: span.range)
+                    storage.addAttribute(.underlineStyle,
+                                         value: NSUnderlineStyle.single.rawValue, range: span.range)
                 } else {
                     storage.addAttribute(.foregroundColor, value: typography.muted, range: span.range)
                     storage.addAttribute(.underlineStyle,

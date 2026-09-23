@@ -46,5 +46,6 @@ enum ThemePreference: String, CaseIterable, Identifiable {
         window?.appearance = preference.appearance
         // メニューバーの項目や設定ウィンドウなど、アプリ全体も揃える
         NSApp.appearance = preference.appearance
+        ApplicationIcon.update(for: preference)
     }
 }

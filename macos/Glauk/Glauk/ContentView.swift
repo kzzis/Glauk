@@ -44,41 +44,43 @@ struct ContentView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            toolbar
+        GeometryReader { geometry in
             HStack(spacing: 0) {
                 if showTree {
-                    NoteTreeView(currentPath: currentRelativePath) { action in
-                        handle(action)
+                    sidebar
+                        .frame(width: min(320, max(252, geometry.size.width * 0.23)))
+                    Rectangle()
+                        .fill(ThemeToken.shellDivider)
+                        .frame(width: 1)
+                }
+
+                VStack(spacing: 0) {
+                    toolbar
+                    Rectangle()
+                        .fill(ThemeToken.shellDivider)
+                        .frame(height: 1)
+                    HStack(spacing: 0) {
+                        editor
+                        if showAgent, let agent {
+                            Rectangle()
+                                .fill(ThemeToken.shellDivider)
+                                .frame(width: 1)
+                            AgentPaneBody(controller: agent,
+                                          selectedAgent: $defaultAgent,
+                                          onSwitch: { kind in
+                                              agent.start(agent: kind,
+                                                          cwd: workingDirectory,
+                                                          activeFile: activeFileForAgent)
+                                          })
+                                .frame(minWidth: 300, idealWidth: 360, maxWidth: 420)
+                        }
                     }
-                    .frame(width: 240)
-                    Divider()
+                    footer
                 }
-
-                MarkdownTextView(text: $document.text,
-                                 noteIndex: noteIndex,
-                                 loadRevision: document.revision,
-                                 indexRevision: noteIndex.revision,
-                                 externalEdit: document.lastExternalEdit,
-                                 themeID: palette,
-                                 onOpenNote: { name in
-                                     Task { await navigator.follow(link: name) }
-                                 })
-
-                if showAgent, let agent {
-                    Divider()
-                    AgentPaneBody(controller: agent,
-                                  selectedAgent: $defaultAgent,
-                                  onSwitch: { kind in
-                                      agent.start(agent: kind,
-                                                  cwd: workingDirectory,
-                                                  activeFile: activeFileForAgent)
-                                  })
-                        .frame(width: 420)
-                }
+                .background(ThemeToken.paper)
             }
         }
-        .frame(minWidth: 900, minHeight: 700)
+        .frame(minWidth: 800, minHeight: 600)
         .preferredColorScheme(ThemePreference(rawValue: theme)?.colorScheme)
         // タイトルバーの外観を揃えるため、NSWindow にも反映する。
         .onChange(of: theme) { _, newValue in
@@ -161,48 +163,133 @@ struct ContentView: View {
         }
     }
 
+    private var sidebar: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("Glauk")
+                    .font(.system(size: 23, weight: .bold, design: .rounded))
+                    .foregroundStyle(ThemeToken.ink)
+                Spacer()
+                iconButton("sidebar.left", help: "サイドバーを隠す (⌘\\)") {
+                    showTree = false
+                }
+            }
+            .padding(.horizontal, 20)
+            .frame(height: 60)
+
+            vaultButton
+                .padding(.horizontal, 16)
+                .padding(.bottom, 16)
+
+            Button { showSwitcher = true } label: {
+                HStack(spacing: 9) {
+                    Image(systemName: "magnifyingglass")
+                    Text("ノートを検索")
+                    Spacer(minLength: 0)
+                    Text("⌘O")
+                        .font(.system(size: 11, weight: .medium))
+                }
+                .font(.system(size: 13))
+                .foregroundStyle(ThemeToken.sidebarSecondary)
+                .padding(.horizontal, 12)
+                .frame(height: 38)
+                .background(ThemeToken.sidebarField, in: RoundedRectangle(cornerRadius: 9))
+            }
+            .buttonStyle(.plain)
+            .help("ノートを検索 (⌘O)")
+            .padding(.horizontal, 16)
+            .padding(.bottom, 12)
+
+            Button {
+                if notesFolder.root != nil {
+                    handle(.newNote(inFolder: ""))
+                } else {
+                    document.createWithPanel()
+                }
+            } label: {
+                Label("新規ノート", systemImage: "plus")
+                    .font(.system(size: 13, weight: .semibold))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 38)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.white)
+            .background(ThemeToken.accent, in: RoundedRectangle(cornerRadius: 9))
+            .padding(.horizontal, 16)
+            .padding(.bottom, 20)
+
+            NoteTreeView(currentPath: currentRelativePath) { action in
+                handle(action)
+            }
+
+            Rectangle().fill(ThemeToken.shellDivider).frame(height: 1)
+            SettingsLink {
+                Label("設定", systemImage: "gearshape")
+                    .font(.system(size: 13))
+                    .foregroundStyle(ThemeToken.sidebarSecondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(height: 46)
+                    .padding(.horizontal, 20)
+            }
+            .buttonStyle(.plain)
+            .help("設定 (⌘,)")
+        }
+        .background(ThemeToken.sidebar)
+    }
+
+    private var editor: some View {
+        Group {
+            if document.path == nil {
+                VStack(spacing: 12) {
+                    Image(systemName: "doc.text")
+                        .font(.system(size: 28, weight: .light))
+                        .foregroundStyle(ThemeToken.sidebarSecondary)
+                    Text("ノートを開いて、書き始めましょう")
+                        .font(.system(size: 17, weight: .medium))
+                    Button("ノートを検索") { showSwitcher = true }
+                        .buttonStyle(.link)
+                }
+                .foregroundStyle(ThemeToken.ink)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                MarkdownTextView(text: $document.text,
+                                 noteIndex: noteIndex,
+                                 loadRevision: document.revision,
+                                 indexRevision: noteIndex.revision,
+                                 externalEdit: document.lastExternalEdit,
+                                 themeID: palette,
+                                 onOpenNote: { name in
+                                     Task { await navigator.follow(link: name) }
+                                 })
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
     private var toolbar: some View {
-        HStack(spacing: 2) {
-            iconButton(showTree ? "sidebar.left" : "sidebar.leading",
-                       // ⌘\ はメニュー側(GlaukApp)が持つ。ここにも付けると
-                       //   同じキーの引き受け手が2つになる。
-                       help: "ノートツリーを出し入れ (⌘\\)") { showTree.toggle() }
-
-            Divider().frame(height: 14).padding(.horizontal, 4)
-
-            // ⌘[ / ⌘] も EditorTextView 側で拾う。ここに .keyboardShortcut を
-            //   付けると、本文にフォーカスがあるとき二重に反応する。
-            iconButton("chevron.left", help: "戻る (⌘[)", enabled: navigator.canGoBack) {
+        HStack(spacing: 12) {
+            if !showTree {
+                iconButton("sidebar.left", help: "サイドバーを表示 (⌘\\)") {
+                    showTree = true
+                }
+                Rectangle().fill(ThemeToken.shellDivider).frame(width: 1, height: 18)
+            }
+            iconButton("arrow.left", help: "戻る (⌘[)", enabled: navigator.canGoBack) {
                 Task { await navigator.goBack() }
             }
-            iconButton("chevron.right", help: "進む (⌘])", enabled: navigator.canGoForward) {
+            iconButton("arrow.right", help: "進む (⌘])", enabled: navigator.canGoForward) {
                 Task { await navigator.goForward() }
             }
-
-            Divider().frame(height: 14).padding(.horizontal, 4)
-
-            // フォルダ未設定でも押せるようにしておく。disabled にすると
-            //   無反応になり、「vault を指定する場所が無い」ように見える。
-            //   未設定のときはスイッチャー側が「フォルダを選ぶ…」を出す。
-            iconButton("magnifyingglass", help: "ノートを探す (⌘O)") { showSwitcher = true }
-            iconButton("square.and.pencil", help: "新規ファイル…") { document.createWithPanel() }
-            iconButton("folder", help: "ファイルを開く (⇧⌘O)") { document.openWithPanel() }
-
-            Divider().frame(height: 14).padding(.horizontal, 4)
-
-            iconButton("terminal",
-                       help: showAgent ? "AIペインを隠す (⌘J)" : "AIペインを出す (⌘J)",
-                       active: showAgent) { toggleAgent() }
-
-            if let name = navigator.currentName {
-                Text(name)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .padding(.leading, 6)
-                    .help(document.path ?? "")
-            }
+            Rectangle().fill(ThemeToken.shellDivider).frame(width: 1, height: 20)
+            Image(systemName: "folder")
+                .font(.system(size: 13))
+                .foregroundStyle(ThemeToken.sidebarSecondary)
+            Text(breadcrumb)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(ThemeToken.sidebarSecondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .help(document.path ?? "")
             Spacer(minLength: 8)
             if let error = document.lastError {
                 Text(error)
@@ -210,22 +297,60 @@ struct ContentView: View {
                     .foregroundStyle(.red)
                     .lineLimit(1)
             }
-            vaultButton
-            SettingsLink {
-                Image(systemName: "gearshape")
-                    .font(.system(size: 13, weight: .regular))
-                    .frame(width: 26, height: 22)
-                    .contentShape(Rectangle())
-                    .foregroundStyle(Color.secondary)
+            Button(action: toggleAgent) {
+                Label(showAgent ? "AIを閉じる" : "AIを開く", systemImage: "sidebar.right")
+                    .font(.system(size: 12, weight: .medium))
+                    .padding(.horizontal, 11)
+                    .frame(height: 30)
+                    .background(ThemeToken.sidebarField, in: RoundedRectangle(cornerRadius: 8))
             }
             .buttonStyle(.plain)
-            .help("設定 (⌘,)")
+            .foregroundStyle(ThemeToken.ink)
+            .help("AIペインを出し入れ (⌘J)")
+            Menu {
+                Button("新規ファイル…") { document.createWithPanel() }
+                Button("ファイルを開く…") { document.openWithPanel() }
+                Button("ノートを検索") { showSwitcher = true }
+                SettingsLink { Text("設定") }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 16, weight: .medium))
+                    .frame(width: 28, height: 30)
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .foregroundStyle(ThemeToken.sidebarSecondary)
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 6)
+        .padding(.horizontal, 20)
+        .frame(height: 52)
     }
 
-    /// .borderless の当たり判定を揃えるため、同じ大きさの枠を敷く。
+    private var footer: some View {
+        HStack(spacing: 10) {
+            Text("⌘O でノートを検索")
+            Text("·")
+            Text("⌘J でAIを開く")
+            Spacer()
+            Text("Markdown")
+        }
+        .font(.system(size: 11))
+        .foregroundStyle(ThemeToken.sidebarSecondary)
+        .padding(.horizontal, 20)
+        .frame(height: 28)
+        .overlay(alignment: .top) {
+            Rectangle().fill(ThemeToken.shellDivider).frame(height: 1)
+        }
+    }
+
+    private var breadcrumb: String {
+        guard let path = document.path else { return "ノートを選択" }
+        if let relative = currentRelativePath {
+            return (relative as NSString).deletingPathExtension
+                .replacingOccurrences(of: "/", with: "  /  ")
+        }
+        return (path as NSString).lastPathComponent
+    }
+
     private func iconButton(_ symbol: String,
                             help: String,
                             enabled: Bool = true,
@@ -233,11 +358,11 @@ struct ContentView: View {
                             action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .font(.system(size: 13))
-                .foregroundStyle(active ? Color.primary : Color.secondary)
-                .frame(width: 26, height: 22)
-                .background(active ? Color.primary.opacity(0.08) : .clear,
-                            in: RoundedRectangle(cornerRadius: 5))
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(active ? ThemeToken.ink : ThemeToken.sidebarSecondary)
+                .frame(width: 28, height: 28)
+                .background(active ? ThemeToken.sidebarField : .clear,
+                            in: RoundedRectangle(cornerRadius: 7))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.borderless)
@@ -245,26 +370,36 @@ struct ContentView: View {
         .help(help)
     }
 
-    /// vault が設定済みなら件数を、未設定なら選ばせる。⌘, を知らなくても辿り着けるように。
     @ViewBuilder
     private var vaultButton: some View {
         if noteIndex.hasFolder, let root = notesFolder.root {
             Button {
                 notesFolder.chooseWithPanel()
             } label: {
-                Label(
-                    noteIndex.isScanning
-                        ? "走査中…"
-                        : "\((root as NSString).lastPathComponent) · \(noteIndex.names.count)",
-                    systemImage: notesFolder.looksLikeObsidianVault ? "shippingbox" : "folder"
-                )
-                .font(.caption)
+                HStack(spacing: 9) {
+                    Image(systemName: "folder")
+                    Text((root as NSString).lastPathComponent)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 10, weight: .semibold))
+                }
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(ThemeToken.ink)
+                .padding(.horizontal, 12)
+                .frame(height: 42)
+                .background(ThemeToken.sidebarField, in: RoundedRectangle(cornerRadius: 9))
             }
-            .buttonStyle(.link)
+            .buttonStyle(.plain)
             .help(root)
         } else {
-            Button("vault を選ぶ…") { notesFolder.chooseWithPanel() }
-                .font(.caption)
+            Button("ノートフォルダを選ぶ…") { notesFolder.chooseWithPanel() }
+                .font(.system(size: 13, weight: .medium))
+                .frame(maxWidth: .infinity)
+                .frame(height: 42)
+                .buttonStyle(.plain)
+                .background(ThemeToken.sidebarField, in: RoundedRectangle(cornerRadius: 9))
         }
     }
 
