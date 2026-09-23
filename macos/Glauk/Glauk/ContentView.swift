@@ -298,7 +298,7 @@ struct ContentView: View {
                     .lineLimit(1)
             }
             Button(action: toggleAgent) {
-                Label(showAgent ? "AIを閉じる" : "AIを開く", systemImage: "sparkle")
+                Label(showAgent ? "AIを閉じる" : "AIを開く", systemImage: "sidebar.right")
                     .font(.system(size: 12, weight: .medium))
                     .padding(.horizontal, 11)
                     .frame(height: 30)

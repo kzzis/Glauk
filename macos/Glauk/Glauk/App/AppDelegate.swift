@@ -9,6 +9,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let noteIndex = NoteIndex()
     let notesFolder = NotesFolder()
     private var statusItem: NSStatusItem?
+    private var appearanceObservation: NSKeyValueObservation?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         overlay.build(
@@ -19,6 +20,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 保存されているテーマを、SwiftUI が立ち上がる前に窓へ入れておく。
         //   後から入れると、一瞬だけ OS のテーマで描かれて切り替わる。
         ThemePreference.apply(.current, to: overlay.window)
+        appearanceObservation = NSApp.observe(\.effectiveAppearance,
+                                              options: [.initial, .new]) { _, _ in
+            Task { @MainActor in ApplicationIcon.update() }
+        }
         installStatusItem()
 
         hotKey.onTrigger = { [weak self] in self?.overlay.toggle() }
